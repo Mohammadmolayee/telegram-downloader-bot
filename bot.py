@@ -1,4 +1,5 @@
 import os
+TOKEN = os.getenv('TOKEN')
 import yt_dlp
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -6,8 +7,7 @@ from telegram.ext import (
     filters, ContextTypes, CallbackQueryHandler
 )
 
-# توکن بات (واقعی رو بذار)
-TOKEN = '7648405518:AAEHsa7g4syYA6_QIE-GJl3U_AKpTYSA4C4'
+
 
 # فولدر دانلود
 DOWNLOAD_FOLDER = "downloads"
