@@ -1,5 +1,6 @@
 import os
 import yt_dlp
+import tempfile
 import glob
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
@@ -19,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "ربات دانلودر اینستاگرام\n"
         "فقط لینک ریل یا پست بفرست\n"
-        "کیفیت: بهترین ممکن (mp4)\n"
+        "کیفیت: بهترین mp4 موجود\n"
         "شروع کن!"
     )
 
@@ -27,7 +28,7 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.message.from_user.id
     url = update.message.text.strip()
 
-    # چک کن لینک اینستاگرام باشه
+    # چک لینک اینستاگرام
     if "instagram.com" not in url:
         await update.message.reply_text("لطفاً فقط لینک اینستاگرام بفرست")
         return
@@ -39,7 +40,6 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_message[uid] = msg
     cancel_flags[uid] = False
 
-    # کوکی (اختیاری)
     cookies_path = None
     if os.getenv('COOKIES_FILE'):
         tmp = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
@@ -48,15 +48,14 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cookies_path = tmp.name
 
     try:
-        # تنظیمات مخصوص اینستاگرام
         opts = {
-            'format': 'best[ext=mp4]/best',  # بهترین mp4 موجود
+            'format': 'best[ext=mp4]/best',  # بهترین mp4، بدون filesize
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
             'noplaylist': True,
             'cookiefile': cookies_path,
             'quiet': True,
             'no_warnings': True,
-            'merge_output_format': 'mp4',  # همیشه به mp4 تبدیل کن
+            'merge_output_format': 'mp4',
             'retries': 5,
             'fragment_retries': 5,
         }
