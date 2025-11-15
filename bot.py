@@ -19,7 +19,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "ربات دانلودر اینستاگرام\n"
         "فقط لینک ریل یا پست بفرست\n"
-        "کیفیت: بهترین ممکن (زیر 45 مگ)\n"
+        "کیفیت: بهترین ممکن (mp4)\n"
         "شروع کن!"
     )
 
@@ -39,21 +39,29 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_message[uid] = msg
     cancel_flags[uid] = False
 
+    # کوکی (اختیاری)
+    cookies_path = None
+    if os.getenv('COOKIES_FILE'):
+        tmp = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
+        tmp.write(os.getenv('COOKIES_FILE'))
+        tmp.close()
+        cookies_path = tmp.name
+
     try:
         # تنظیمات مخصوص اینستاگرام
-        ydl_opts = {
-            'format': 'best[ext=mp4][filesize<45M]/best[filesize<45M]',
+        opts = {
+            'format': 'best[ext=mp4]/best',  # بهترین mp4 موجود
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
+            'noplaylist': True,
+            'cookiefile': cookies_path,
             'quiet': True,
             'no_warnings': True,
-            'retries': 3,
-            'fragment_retries': 3,
-            'merge_output_format': 'mp4',
-            # مهم: کوکی برای اینستاگرام
-            'cookiefile': '/tmp/cookies.txt' if os.path.exists('/tmp/cookies.txt') else None,
+            'merge_output_format': 'mp4',  # همیشه به mp4 تبدیل کن
+            'retries': 5,
+            'fragment_retries': 5,
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             title = info.get('title', 'ویدیو اینستاگرام')
 
@@ -61,10 +69,14 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not cancel_flags.get(uid, False):
             await msg.edit_text(f"خطا: {str(e)[:100]}")
         cleanup(uid)
+        if cookies_path and os.path.exists(cookies_path):
+            os.unlink(cookies_path)
         return
 
     if cancel_flags.get(uid, False):
         cleanup(uid)
+        if cookies_path and os.path.exists(cookies_path):
+            os.unlink(cookies_path)
         return
 
     files = glob.glob(f"{DOWNLOAD_FOLDER}/*")
@@ -81,6 +93,8 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("فایل پیدا نشد!")
 
     cleanup(uid)
+    if cookies_path and os.path.exists(cookies_path):
+        os.unlink(cookies_path)
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
