@@ -1,8 +1,6 @@
 import os
 import yt_dlp
-import tempfile
 import glob
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
@@ -13,27 +11,76 @@ if not TOKEN:
 DOWNLOAD_FOLDER = "downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-user_quality = {}
 temp_message = {}
 cancel_flags = {}
 
 # --- دستورات ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ربات دانلودر حرفه‌ای\n"
-        "ویدیوهای زیر 45 مگابایت رو کامل دانلود می‌کنه\n"
-        "برای ویدیوهای طولانی: 360p انتخاب کن\n"
-        "پشتیبانی: یوتیوب، اینستاگرام، تیک‌تاک، توییتر\n"
-        "/menu بزن"
+        "ربات دانلودر اینستاگرام\n"
+        "فقط لینک ریل یا پست بفرست\n"
+        "کیفیت: بهترین ممکن (زیر 45 مگ)\n"
+        "شروع کن!"
     )
 
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("720p", callback_data='q_720')],
-        [InlineKeyboardButton("360p (کامل)", callback_data='q_360')],
-        [InlineKeyboardButton("صوت", callback_data='q_audio')],
-    ]
-    await update.message.reply_text("کیفیت رو انتخاب کن:", reply_markup=InlineKeyboardMarkup(keyboard))
+async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.message.from_user.id
+    url = update.message.text.strip()
+
+    # چک کن لینک اینستاگرام باشه
+    if "instagram.com" not in url:
+        await update.message.reply_text("لطفاً فقط لینک اینستاگرام بفرست")
+        return
+
+    msg = await update.message.reply_text(
+        "در حال دانلود از اینستاگرام... ⏳",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("لغو", callback_data=f'cancel_{uid}')]])
+    )
+    temp_message[uid] = msg
+    cancel_flags[uid] = False
+
+    try:
+        # تنظیمات مخصوص اینستاگرام
+        ydl_opts = {
+            'format': 'best[ext=mp4][filesize<45M]/best[filesize<45M]',
+            'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
+            'quiet': True,
+            'no_warnings': True,
+            'retries': 3,
+            'fragment_retries': 3,
+            'merge_output_format': 'mp4',
+            # مهم: کوکی برای اینستاگرام
+            'cookiefile': '/tmp/cookies.txt' if os.path.exists('/tmp/cookies.txt') else None,
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get('title', 'ویدیو اینستاگرام')
+
+    except Exception as e:
+        if not cancel_flags.get(uid, False):
+            await msg.edit_text(f"خطا: {str(e)[:100]}")
+        cleanup(uid)
+        return
+
+    if cancel_flags.get(uid, False):
+        cleanup(uid)
+        return
+
+    files = glob.glob(f"{DOWNLOAD_FOLDER}/*")
+    if files:
+        fpath = files[0]
+        try:
+            with open(fpath, 'rb') as f:
+                await update.message.reply_video(f, caption=title)
+            os.remove(fpath)
+            await msg.delete()
+        except Exception as e:
+            await msg.edit_text(f"خطا در ارسال: {e}")
+    else:
+        await msg.edit_text("فایل پیدا نشد!")
+
+    cleanup(uid)
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -47,124 +94,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await temp_message[uid2].edit_text("لغو شد!")
         return
 
-    qmap = {
-        'q_720': {'format': 'best[height<=720]/best', 'name': '720p', 'max_size': 45},
-        'q_360': {'format': 'best[height<=360]/best', 'name': '360p (کامل)', 'max_size': 45},
-        'q_audio': {'format': 'bestaudio/best', 'name': 'صوت', 'max_size': None},
-    }
-    if q.data in qmap:
-        user_quality[uid] = qmap[q.data]
-        await q.edit_message_text(f"کیفیت {qmap[q.data]['name']} انتخاب شد. لینک بفرست")
-    else:
-        await q.edit_message_text("خطا")
-
-async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.from_user.id
-    url = update.message.text.strip()
-
-    if uid not in user_quality:
-        await update.message.reply_text("اول /menu بزن")
-        return
-
-    msg = await update.message.reply_text(
-        "در حال دانلود... ⏳",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("لغو", callback_data=f'cancel_{uid}')]])
-    )
-    temp_message[uid] = msg
-    cancel_flags[uid] = False
-
-    cookies_path = None
-    if os.getenv('COOKIES_FILE'):
-        tmp = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
-        tmp.write(os.getenv('COOKIES_FILE'))
-        tmp.close()
-        cookies_path = tmp.name
-
-    try:
-        quality = user_quality[uid]
-        format_str = quality['format']
-        name = quality['name']
-        max_size = quality['max_size']
-
-        # تشخیص پلتفرم
-        platform = "نامشخص"
-        if "youtube.com" in url or "youtu.be" in url:
-            platform = "یوتیوب"
-        elif "instagram.com" in url:
-            platform = "اینستاگرام"
-        elif "tiktok.com" in url:
-            platform = "تیک‌تاک"
-        elif "twitter.com" in url or "x.com" in url:
-            platform = "توییتر"
-
-        await msg.edit_text(f"در حال دانلود از {platform}... ⏳")
-
-        # فرمت نهایی
-        if max_size:
-            final_format = f'{format_str}[filesize<{max_size}M]/best[filesize<{max_size}M]'
-        else:
-            final_format = format_str  # صوت
-
-        opts = {
-            'format': final_format,
-            'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-            'noplaylist': True,
-            'cookiefile': cookies_path,
-            'quiet': True,
-            'no_warnings': True,
-            'merge_output_format': 'mp4',
-            'retries': 3,
-            'fragment_retries': 3,
-        }
-
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get('title', 'فایل')
-            duration = info.get('duration', 0)
-
-        # هشدار برای ویدیوهای طولانی
-        if duration and duration > 600 and max_size:  # 10 دقیقه + حجم محدود
-            await msg.edit_text(
-                f"ویدیو {duration//60} دقیقه‌ای است!\n"
-                f"کیفیت {name} ممکنه فقط چند ثانیه اول رو بگیره\n"
-                f"برای دانلود کامل: 360p (کامل) انتخاب کن"
-            )
-            await asyncio.sleep(3)
-
-    except Exception as e:
-        if not cancel_flags.get(uid, False):
-            await msg.edit_text(f"خطا: {str(e)[:100]}")
-        cleanup(uid)
-        if cookies_path and os.path.exists(cookies_path):
-            os.unlink(cookies_path)
-        return
-
-    if cancel_flags.get(uid, False):
-        cleanup(uid)
-        if cookies_path and os.path.exists(cookies_path):
-            os.unlink(cookies_path)
-        return
-
-    files = glob.glob(f"{DOWNLOAD_FOLDER}/*")
-    if files:
-        fpath = files[0]
-        try:
-            with open(fpath, 'rb') as f:
-                if 'audio' in quality['format']:
-                    await update.message.reply_audio(f, caption=f"{title} ({platform})")
-                else:
-                    await update.message.reply_video(f, caption=f"{title} ({platform})")
-            os.remove(fpath)
-            await msg.delete()
-        except Exception as e:
-            await msg.edit_text(f"خطا در ارسال: {e}")
-    else:
-        await msg.edit_text("فایل پیدا نشد!")
-
-    cleanup(uid)
-    if cookies_path and os.path.exists(cookies_path):
-        os.unlink(cookies_path)
-
 def cleanup(uid):
     temp_message.pop(uid, None)
     cancel_flags.pop(uid, None)
@@ -172,11 +101,10 @@ def cleanup(uid):
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download))
 
-    print("Bot is running with polling...")
+    print("Instagram Downloader Bot is running...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
