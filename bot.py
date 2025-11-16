@@ -1,7 +1,7 @@
 # ========================================
-# ربات دانلودر حرفه‌ای - نسخه کامل
-# حساب کاربری + فرم ثبت‌نام + تأیید ایمیل + ورود
-# فقط کپی کن و در Railway آپلود کن
+# ربات دانلودر حرفه‌ای - نسخه نهایی
+# منو ۴ دکمه + فرم + ایمیل + ورود + دانلودها
+# فقط کپی کن و آپلود کن
 # ========================================
 
 import os
@@ -14,9 +14,10 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from email.mime.text import MIMEText
 
 # -------------------------------
-# تنظیمات (از Railway Variables)
+# تنظیمات
 # -------------------------------
 TOKEN = os.getenv('TOKEN')
 GMAIL_CLIENT_ID = os.getenv('GMAIL_CLIENT_ID')
@@ -25,12 +26,12 @@ GMAIL_REFRESH_TOKEN = os.getenv('GMAIL_REFRESH_TOKEN')
 GMAIL_SENDER = os.getenv('GMAIL_SENDER')
 
 if not all([TOKEN, GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_SENDER]):
-    raise ValueError("متغیرهای Gmail رو در Railway Variables بذار!")
+    raise ValueError("متغیرهای Gmail رو در Railway بذار!")
 
 DB_PATH = "downloads.db"
 
 # -------------------------------
-# دیتابیس — ساخت جداول
+# دیتابیس
 # -------------------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -43,7 +44,6 @@ def init_db():
             email TEXT,
             password TEXT,
             verified BOOLEAN DEFAULT False,
-            verification_code TEXT,
             created_at TEXT
         )
     ''')
@@ -64,7 +64,7 @@ def init_db():
 init_db()
 
 # -------------------------------
-# ارسال ایمیل با Gmail API
+# ارسال ایمیل
 # -------------------------------
 def send_email(to_email, code):
     credentials = Credentials(
@@ -92,7 +92,7 @@ def create_user(user_id, username, first_name, email, password):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO users (user_id, username, first_name, email, password, verified, created_at)
+        INSERT OR IGNORE INTO users (user_id, username, first_name, email, password, verified, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     ''', (user_id, username, first_name, email, password, True, datetime.now().isoformat()))
     conn.commit()
@@ -127,7 +127,7 @@ def get_user_downloads(user_id, limit=5):
     return rows
 
 # -------------------------------
-# دستور /start — منو
+# /start — منو ۴ دکمه
 # -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -158,11 +158,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_exists(user_id):
             await query.edit_message_text("شما قبلاً حساب دارید!")
             return
+        context.user_data.clear()  # پاک کردن قبلی
         context.user_data['step'] = 'first_name'
         context.user_data['user_id'] = user_id
         await query.edit_message_text("نام و نام خانوادگی رو بفرست")
 
     elif data == 'login':
+        context.user_data.clear()
         context.user_data['step'] = 'username_login'
         await query.edit_message_text("یوزرنیم رو بفرست")
 
@@ -189,7 +191,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # -------------------------------
-# پیام‌ها (فرم)
+# پیام‌ها
 # -------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -267,7 +269,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("ربات دانلودر با حساب کاربری فعال شد...")
+    print("ربات دانلودر با منو کامل فعال شد...")
     app.run_polling()
 
 if __name__ == '__main__':
