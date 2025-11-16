@@ -1,22 +1,35 @@
+# ========================================
+# ربات دانلودر اینستاگرام - نسخه حرفه‌ای
+# نویسنده: حاجی (با کمک هوش مصنوعی)
+# تاریخ: 16 نوامبر 2025
+# ========================================
+
 import os
 import yt_dlp
-import tempfile
 import glob
+import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-TOKEN = os.getenv('TOKEN')
+# -------------------------------
+# تنظیمات اصلی (اینجا تغییر بده)
+# -------------------------------
+TOKEN = os.getenv('TOKEN')  # توکن ربات (از BotFather)
 if not TOKEN:
-    raise ValueError("TOKEN not set")
+    raise ValueError("TOKEN رو در Railway Variables بذار!")
 
-DOWNLOAD_FOLDER = "downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+DOWNLOAD_FOLDER = "downloads"  # پوشه موقت دانلود
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)  # اگه نبود، بساز
 
-temp_message = {}
-cancel_flags = {}
+# متغیرهای موقت برای هر کاربر
+temp_message = {}   # پیام "در حال دانلود..." رو ذخیره می‌کنه
+cancel_flags = {}   # آیا کاربر دکمه لغو رو زده؟
 
-# --- دستورات ---
+# -------------------------------
+# دستور /start — خوش‌آمدگویی
+# -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """وقتی کاربر /start بزنه"""
     await update.message.reply_text(
         "ربات دانلودر اینستاگرام\n"
         "فقط لینک ریل یا پست بفرست\n"
@@ -24,22 +37,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "شروع کن!"
     )
 
+# -------------------------------
+# تابع دانلود — قلب ربات
+# -------------------------------
 async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.message.from_user.id
+    """هر وقت کاربر لینک بفرسته"""
+    user_id = update.message.from_user.id
     url = update.message.text.strip()
 
-    # چک لینک اینستاگرام
+    # فقط لینک اینستاگرام قبول کن
     if "instagram.com" not in url:
         await update.message.reply_text("لطفاً فقط لینک اینستاگرام بفرست")
         return
 
+    # پیام "در حال دانلود..." با دکمه لغو
     msg = await update.message.reply_text(
         "در حال دانلود از اینستاگرام... ⏳",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("لغو", callback_data=f'cancel_{uid}')]])
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("لغو", callback_data=f'cancel_{user_id}')]
+        ])
     )
-    temp_message[uid] = msg
-    cancel_flags[uid] = False
+    temp_message[user_id] = msg
+    cancel_flags[user_id] = False  # هنوز لغو نشده
 
+    # کوکی (برای دسترسی بهتر به اینستاگرام)
     cookies_path = None
     if os.getenv('COOKIES_FILE'):
         tmp = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
@@ -48,9 +69,10 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cookies_path = tmp.name
 
     try:
-        opts = {
-            'format': 'best[ext=mp4]/best',  # بهترین mp4، بدون filesize
-            'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
+        # تنظیمات yt-dlp برای اینستاگرام
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best',           # بهترین mp4
+            'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',  # اسم فایل: ID ویدیو
             'noplaylist': True,
             'cookiefile': cookies_path,
             'quiet': True,
@@ -60,64 +82,74 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'fragment_retries': 5,
         }
 
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            video_id = info.get('id', 'unknown')
             title = info.get('title', 'ویدیو اینستاگرام')
 
+        # فایل دانلود شده
+        file_path = glob.glob(f"{DOWNLOAD_FOLDER}/{video_id}.*")[0]
+
     except Exception as e:
-        if not cancel_flags.get(uid, False):
-            await msg.edit_text(f"خطا: {str(e)[:100]}")
-        cleanup(uid)
-        if cookies_path and os.path.exists(cookies_path):
-            os.unlink(cookies_path)
+        # خطا در دانلود
+        if not cancel_flags.get(user_id, False):
+            await msg.edit_text(f"خطا در دانلود:\n{str(e)[:100]}")
+        cleanup(user_id, cookies_path)
         return
 
-    if cancel_flags.get(uid, False):
-        cleanup(uid)
-        if cookies_path and os.path.exists(cookies_path):
-            os.unlink(cookies_path)
+    # کاربر لغو کرده؟
+    if cancel_flags.get(user_id, False):
+        cleanup(user_id, cookies_path)
         return
 
-    files = glob.glob(f"{DOWNLOAD_FOLDER}/*")
-    if files:
-        fpath = files[0]
-        try:
-            with open(fpath, 'rb') as f:
-                await update.message.reply_video(f, caption=title)
-            os.remove(fpath)
-            await msg.delete()
-        except Exception as e:
-            await msg.edit_text(f"خطا در ارسال: {e}")
-    else:
-        await msg.edit_text("فایل پیدا نشد!")
+    # ارسال ویدیو
+    try:
+        with open(file_path, 'rb') as video_file:
+            await update.message.reply_video(video_file, caption=title)
+        os.remove(file_path)  # پاک کردن فایل
+        await msg.delete()    # پاک کردن پیام "در حال دانلود"
+    except Exception as e:
+        await msg.edit_text(f"خطا در ارسال: {e}")
 
-    cleanup(uid)
+    cleanup(user_id, cookies_path)
+
+# -------------------------------
+# دکمه لغو
+# -------------------------------
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """وقتی کاربر دکمه لغو رو بزنه"""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if query.data.startswith('cancel_'):
+        clicked_user_id = int(query.data.split('_')[1])
+        if clicked_user_id == user_id and clicked_user_id in temp_message:
+            cancel_flags[clicked_user_id] = True
+            await temp_message[clicked_user_id].edit_text("لغو شد!")
+
+# -------------------------------
+# تابع پاکسازی
+# -------------------------------
+def cleanup(user_id, cookies_path=None):
+    """پاک کردن فایل‌ها و متغیرها"""
+    temp_message.pop(user_id, None)
+    cancel_flags.pop(user_id, None)
     if cookies_path and os.path.exists(cookies_path):
         os.unlink(cookies_path)
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    uid = q.from_user.id
-
-    if q.data.startswith('cancel_'):
-        uid2 = int(q.data.split('_')[1])
-        if uid2 == uid and uid2 in temp_message:
-            cancel_flags[uid2] = True
-            await temp_message[uid2].edit_text("لغو شد!")
-        return
-
-def cleanup(uid):
-    temp_message.pop(uid, None)
-    cancel_flags.pop(uid, None)
-
+# -------------------------------
+# اجرای ربات (polling)
+# -------------------------------
 def main():
     app = Application.builder().token(TOKEN).build()
+
+    # هندلرها
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download))
 
-    print("Instagram Downloader Bot is running...")
+    print("ربات دانلودر اینستاگرام فعال شد...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
