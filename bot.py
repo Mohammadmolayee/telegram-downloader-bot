@@ -1,6 +1,6 @@
 # ========================================
-# ربات دانلودر حرفه‌ای - نسخه نهایی با Webhook
-# بدون ایمیل + بدون تداخل + پایدار
+# ربات دانلودر حرفه‌ای - نسخه نهایی بهینه
+# بدون ایمیل + Webhook + بهینه‌سازی کامل
 # ========================================
 
 import os
@@ -18,16 +18,18 @@ TOKEN = os.getenv('TOKEN')
 if not TOKEN:
     raise ValueError("TOKEN رو در Railway بذار!")
 
-DB_PATH = "downloads.db"
-DOWNLOAD_FOLDER = "downloads"
+DB_PATH = "/tmp/downloads.db"  # استفاده از /tmp برای سرعت و پایداری
+DOWNLOAD_FOLDER = "/tmp/downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 # -------------------------------
-# دیتابیس
+# دیتابیس (بهینه‌شده)
 # -------------------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute('PRAGMA journal_mode = WAL;')  # سرعت بالا
+    cursor.execute('PRAGMA synchronous = NORMAL;')  # تعادل سرعت/امنیت
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -54,77 +56,56 @@ def init_db():
 init_db()
 
 # -------------------------------
-# توابع دیتابیس
+# توابع دیتابیس (سریع و امن)
 # -------------------------------
 def create_user(user_id, username, first_name, password):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute('''
-            INSERT INTO users (user_id, username, first_name, password, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (user_id, username, first_name, password, datetime.now().isoformat()))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        try:
+            conn.execute('''
+                INSERT INTO users (user_id, username, first_name, password, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, username, first_name, password, datetime.now().isoformat()))
+            return True
+        except sqlite3.IntegrityError:
+            return False
 
 def user_exists(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
-    exists = cursor.fetchone() is not None
-    conn.close()
-    return exists
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,)).fetchone() is not None
 
 def check_login(username, password):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM users WHERE username = ? AND password = ?', (username, password))
-    exists = cursor.fetchone() is not None
-    conn.close()
-    return exists
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute('SELECT 1 FROM users WHERE username = ? AND password = ?', (username, password)).fetchone() is not None
 
 def save_download(user_id, platform, url, title, file_type):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (user_id, platform, url, title, file_type, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('''
+            INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (user_id, platform, url, title, file_type, datetime.now().isoformat()))
 
 def get_user_downloads(user_id, limit=5):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT platform, title, file_type, downloaded_at
-        FROM downloads WHERE user_id = ?
-        ORDER BY downloaded_at DESC LIMIT ?
-    ''', (user_id, limit))
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
+    with sqlite3.connect(DB_PATH) as conn:
+        return conn.execute('''
+            SELECT platform, title, file_type, downloaded_at
+            FROM downloads WHERE user_id = ?
+            ORDER BY downloaded_at DESC LIMIT ?
+        ''', (user_id, limit)).fetchall()
 
 # -------------------------------
 # /start — منو
 # -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("ساخت حساب کاربری", callback_data='create_account')],
-        [InlineKeyboardButton("ورود به حساب", callback_data='login')],
-        [InlineKeyboardButton("دانلودهای من", callback_data='my_downloads')],
+        [InlineKeyboardButton("ساخت حساب", callback_data='create')],
+        [InlineKeyboardButton("ورود", callback_data='login')],
+        [InlineKeyboardButton("دانلودها", callback_data='downloads')],
         [InlineKeyboardButton("راهنما", callback_data='help')],
     ]
     await update.message.reply_text(
-        "سلام! به ربات دانلودر حرفه‌ای خوش اومدی\n"
-        "اینجا می‌تونی:\n"
-        "ویدیو و اهنگ هر پلتفرمی دانلود کنی\n"
-        "پشتیبانی از تمامی پلتفرم ها : یوتیوب,اینستاگرام,تیک‌تاک,توییتر,فیسبوک,ساندکلود,اسپاتیفای و....\n"
-        "فقط لینک رو بفرست، بقیه‌ش با ماست!",
+        "به ربات دانلودر حرفه‌ای خوش اومدی!\n"
+        "ویدیو و آهنگ از هر پلتفرمی دانلود کن\n"
+        "فقط لینک رو بفرست!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -137,29 +118,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    if data == 'create_account':
+    if data == 'create':
         if user_exists(user_id):
             await query.edit_message_text("شما قبلاً حساب دارید!")
             return
-        context.user_data.clear()
-        context.user_data['step'] = 'first_name'
-        context.user_data['user_id'] = user_id
+        context.user_data.update({'step': 'first_name', 'user_id': user_id})
         await query.edit_message_text("نام و نام خانوادگی رو بفرست")
 
     elif data == 'login':
-        context.user_data.clear()
-        context.user_data['step'] = 'username_login'
+        context.user_data.update({'step': 'username_login'})
         await query.edit_message_text("یوزرنیم رو بفرست")
 
-    elif data == 'my_downloads':
+    elif data == 'downloads':
         if not user_exists(user_id):
             await query.edit_message_text("اول حساب بساز یا وارد شو!")
             return
         downloads = get_user_downloads(user_id)
         if not downloads:
-            await query.edit_message_text("هنوز هیچ دانلودی نداری!")
+            await query.edit_message_text("هنوز دانلودی نداری!")
             return
-        text = "آخرین دانلودهای تو:\n\n"
+        text = "آخرین دانلودها:\n\n"
         for plat, title, ftype, time in downloads:
             icon = "ویدیو" if ftype == "video" else "آهنگ"
             text += f"{icon} {plat}: {title}\n   {time.split('T')[0]}\n\n"
@@ -170,7 +148,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "راهنما:\n"
             "1. حساب بساز (نام + یوزرنیم + پسورد)\n"
             "2. وارد شو\n"
-            "3. لینک اینستاگرام بفرست و دانلود کن"
+            "3. لینک اینستاگرام/یوتیوب بفرست"
         )
 
 # -------------------------------
@@ -181,8 +159,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     step = context.user_data.get('step')
 
-    if not step and "instagram.com" in text and user_exists(user_id):
-        await download_instagram(update, context, text, user_id)
+    # دانلود خودکار
+    if not step and any(p in text for p in ["instagram.com", "youtube.com", "youtu.be"]) and user_exists(user_id):
+        await download_video(update, context, text, user_id)
         return
 
     if not step:
@@ -190,51 +169,44 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if step == 'first_name':
-        context.user_data['first_name'] = text
-        context.user_data['step'] = 'username'
+        context.user_data.update({'first_name': text, 'step': 'username'})
         await update.message.reply_text("یوزرنیم رو بفرست (مثل @mohammad)")
 
     elif step == 'username':
-        if text.startswith('@'): text = text[1:]
-        context.user_data['username'] = text
-        context.user_data['step'] = 'password'
+        username = text.lstrip('@')
+        context.user_data.update({'username': username, 'step': 'password'})
         await update.message.reply_text("پسورد رو بفرست (حداقل ۶ حرف)")
 
     elif step == 'password':
         if len(text) < 6:
             await update.message.reply_text("پسورد کوتاهه! حداقل ۶ حرف")
             return
-        success = create_user(
-            user_id=context.user_data['user_id'],
-            username=context.user_data['username'],
-            first_name=context.user_data['first_name'],
-            password=text
-        )
-        if success:
-            await update.message.reply_text("حساب با موفقیت ساخته شد! حالا لینک اینستاگرام بفرست")
+        if create_user(user_id, context.user_data['username'], context.user_data['first_name'], text):
+            await update.message.reply_text("حساب ساخته شد! حالا لینک بفرست")
         else:
-            await update.message.reply_text("یوزرنیم تکراریه! دوباره امتحان کن")
+            await update.message.reply_text("یوزرنیم تکراریه!")
             context.user_data['step'] = 'username'
         context.user_data.clear()
 
     elif step == 'username_login':
-        context.user_data['username_login'] = text
-        context.user_data['step'] = 'password_login'
+        context.user_data.update({'username_login': text, 'step': 'password_login'})
         await update.message.reply_text("پسورد رو بفرست")
 
     elif step == 'password_login':
         if check_login(context.user_data['username_login'], text):
-            await update.message.reply_text("ورود موفق! حالا لینک اینستاگرام بفرست")
+            await update.message.reply_text("ورود موفق! لینک بفرست")
             context.user_data.clear()
         else:
             await update.message.reply_text("یوزرنیم یا پسورد اشتباه!")
             context.user_data['step'] = 'username_login'
 
 # -------------------------------
-# دانلود اینستاگرام
+# دانلود ویدیو (اینستا + یوتیوب)
 # -------------------------------
-async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, user_id: int):
-    msg = await update.message.reply_text("در حال دانلود از اینستاگرام... ⏳")
+async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, user_id: int):
+    msg = await update.message.reply_text("در حال دانلود... ⏳")
+    platform = "YouTube" if "youtube" in url or "youtu.be" in url else "Instagram"
+    
     try:
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
@@ -242,29 +214,28 @@ async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE,
             'noplaylist': True,
             'quiet': True,
             'merge_output_format': 'mp4',
+            'retries': 3,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            video_id = info.get('id')
-            title = info.get('title', 'ویدیو اینستاگرام')
-
-        file_path = glob.glob(f"{DOWNLOAD_FOLDER}/{video_id}.*")[0]
+            file_path = glob.glob(f"{DOWNLOAD_FOLDER}/{info.get('id')}.*")[0]
+            title = info.get('title', 'ویدیو')
 
         with open(file_path, 'rb') as f:
-            await update.message.reply_video(f, caption=title)
+            await update.message.reply_video(f, caption=f"{platform}: {title}")
 
-        save_download(user_id, "Instagram", url, title, "video")
+        save_download(user_id, platform, url, title, "video")
         os.remove(file_path)
         await msg.delete()
 
     except Exception as e:
-        await msg.edit_text(f"خطا: {str(e)[:100]}")
+        await msg.edit_text(f"خطا: دانلود نشد!")
 
 # -------------------------------
 # اجرای ربات با Webhook
 # -------------------------------
 def main():
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).concurrent_updates(True).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
