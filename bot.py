@@ -1,32 +1,20 @@
 # ========================================
-# ربات دانلودر حرفه‌ای - نسخه نهایی
-# منو ۴ دکمه + ثبت‌نام + ورود + دانلود اینستاگرام (فقط برای کاربران لاگین شده)
+# ربات دانلودر حرفه‌ای - نسخه نهایی با Webhook
+# بدون ایمیل + بدون تداخل + پایدار
 # ========================================
 
 import os
 import sqlite3
-import random
-import base64
 import yt_dlp
 import glob
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from email.mime.text import MIMEText
 
 # -------------------------------
 # تنظیمات
 # -------------------------------
 TOKEN = os.getenv('TOKEN')
-GMAIL_CLIENT_ID = os.getenv('GMAIL_CLIENT_ID')
-GMAIL_CLIENT_SECRET = os.getenv('GMAIL_CLIENT_SECRET')
-GMAIL_REFRESH_TOKEN = os.getenv('GMAIL_REFRESH_TOKEN')
-GMAIL_SENDER = os.getenv('GMAIL_SENDER')
-COOKIES_FILE = os.getenv('COOKIES_FILE')  # کوکی اینستاگرام (اختیاری)
-
 if not TOKEN:
     raise ValueError("TOKEN رو در Railway بذار!")
 
@@ -45,9 +33,7 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             username TEXT UNIQUE,
             first_name TEXT,
-            email TEXT,
             password TEXT,
-            verified BOOLEAN DEFAULT False,
             created_at TEXT
         )
     ''')
@@ -68,42 +54,22 @@ def init_db():
 init_db()
 
 # -------------------------------
-# ارسال ایمیل
-# -------------------------------
-def send_email(to_email, code):
-    if not all([GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_SENDER]):
-        print("Gmail متغیرها تنظیم نشده")
-        return
-    credentials = Credentials(
-        token=None,
-        refresh_token=GMAIL_REFRESH_TOKEN,
-        token_uri='https://oauth2.googleapis.com/token',
-        client_id=GMAIL_CLIENT_ID,
-        client_secret=GMAIL_CLIENT_SECRET
-    )
-    service = build('gmail', 'v1', credentials=credentials)
-    message = MIMEText(f"کد تأیید حساب شما:\n\n{code}\n\nاین کد ۱۰ دقیقه اعتبار دارد.")
-    message['to'] = to_email
-    message['from'] = GMAIL_SENDER
-    message['subject'] = "کد تأیید ربات دانلودر"
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    try:
-        service.users().messages().send(userId="me", body={'raw': raw}).execute()
-    except HttpError as e:
-        print(f"خطا در ارسال ایمیل: {e}")
-
-# -------------------------------
 # توابع دیتابیس
 # -------------------------------
-def create_user(user_id, username, first_name, email, password):
+def create_user(user_id, username, first_name, password):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR IGNORE INTO users (user_id, username, first_name, email, password, verified, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (user_id, username, first_name, email, password, True, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+    try:
+        cursor.execute('''
+            INSERT INTO users (user_id, username, first_name, password, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, username, first_name, password, datetime.now().isoformat()))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
 
 def user_exists(user_id):
     conn = sqlite3.connect(DB_PATH)
@@ -121,9 +87,6 @@ def check_login(username, password):
     conn.close()
     return exists
 
-def is_logged_in(user_id):
-    return user_exists(user_id)
-
 def save_download(user_id, platform, url, title, file_type):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -133,6 +96,18 @@ def save_download(user_id, platform, url, title, file_type):
     ''', (user_id, platform, url, title, file_type, datetime.now().isoformat()))
     conn.commit()
     conn.close()
+
+def get_user_downloads(user_id, limit=5):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT platform, title, file_type, downloaded_at
+        FROM downloads WHERE user_id = ?
+        ORDER BY downloaded_at DESC LIMIT ?
+    ''', (user_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 # -------------------------------
 # /start — منو
@@ -193,24 +168,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'help':
         await query.edit_message_text(
             "راهنما:\n"
-            "1. حساب بساز\n"
-            "2. کد تأیید رو از ایمیل وارد کن\n"
+            "1. حساب بساز (نام + یوزرنیم + پسورد)\n"
+            "2. وارد شو\n"
             "3. لینک اینستاگرام بفرست و دانلود کن"
         )
 
 # -------------------------------
-# پیام‌ها (فرم + اینستاگرام)
+# پیام‌ها
 # -------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
     step = context.user_data.get('step')
 
-    # اگر در فرم نباشه، چک کن لینک اینستاگرام باشه
-    if not step and "instagram.com" in text:
-        if not user_exists(user_id):
-            await update.message.reply_text("اول حساب بساز یا وارد شو!")
-            return
+    if not step and "instagram.com" in text and user_exists(user_id):
         await download_instagram(update, context, text, user_id)
         return
 
@@ -218,7 +189,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("از منو شروع کن!")
         return
 
-    # --- ثبت‌نام ---
     if step == 'first_name':
         context.user_data['first_name'] = text
         context.user_data['step'] = 'username'
@@ -234,36 +204,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(text) < 6:
             await update.message.reply_text("پسورد کوتاهه! حداقل ۶ حرف")
             return
-        context.user_data['password'] = text
-        context.user_data['step'] = 'email'
-        await update.message.reply_text("ایمیل (جیمیل) رو بفرست")
-
-    elif step == 'email':
-        if not text.endswith('@gmail.com'):
-            await update.message.reply_text("فقط جیمیل قبول می‌کنم!")
-            return
-        context.user_data['email'] = text
-        code = str(random.randint(100000, 999999))
-        context.user_data['verification_code'] = code
-        context.user_data['step'] = 'verify_code'
-        send_email(text, code)
-        await update.message.reply_text("کد تأیید به ایمیلت فرستاده شد. کد ۶ رقمی رو بفرست")
-
-    elif step == 'verify_code':
-        if text == context.user_data.get('verification_code'):
-            create_user(
-                user_id=context.user_data['user_id'],
-                username=context.user_data['username'],
-                first_name=context.user_data['first_name'],
-                email=context.user_data['email'],
-                password=context.user_data['password']
-            )
+        success = create_user(
+            user_id=context.user_data['user_id'],
+            username=context.user_data['username'],
+            first_name=context.user_data['first_name'],
+            password=text
+        )
+        if success:
             await update.message.reply_text("حساب با موفقیت ساخته شد! حالا لینک اینستاگرام بفرست")
-            context.user_data.clear()
         else:
-            await update.message.reply_text("کد اشتباه! دوباره بفرست")
+            await update.message.reply_text("یوزرنیم تکراریه! دوباره امتحان کن")
+            context.user_data['step'] = 'username'
+        context.user_data.clear()
 
-    # --- ورود ---
     elif step == 'username_login':
         context.user_data['username_login'] = text
         context.user_data['step'] = 'password_login'
@@ -282,25 +235,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------------------------------
 async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, user_id: int):
     msg = await update.message.reply_text("در حال دانلود از اینستاگرام... ⏳")
-
-    cookies_path = None
-    if COOKIES_FILE:
-        import tempfile
-        tmp = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
-        tmp.write(COOKIES_FILE)
-        tmp.close()
-        cookies_path = tmp.name
-
     try:
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',
             'noplaylist': True,
-            'cookiefile': cookies_path,
             'quiet': True,
-            'no_warnings': True,
             'merge_output_format': 'mp4',
-            'retries': 5,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -318,20 +259,23 @@ async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     except Exception as e:
         await msg.edit_text(f"خطا: {str(e)[:100]}")
-    finally:
-        if cookies_path and os.path.exists(cookies_path):
-            os.unlink(cookies_path)
 
 # -------------------------------
-# اجرای ربات
+# اجرای ربات با Webhook
 # -------------------------------
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("ربات دانلودر با اینستاگرام فعال شد...")
-    app.run_polling()
+    
+    PORT = int(os.getenv('PORT', 8000))
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TOKEN,
+        webhook_url=f"https://rare-charisma-bot.up.railway.app/{TOKEN}"
+    )
 
 if __name__ == '__main__':
     main()
