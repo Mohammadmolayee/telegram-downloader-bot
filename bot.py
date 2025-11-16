@@ -1,6 +1,7 @@
 # ========================================
-# ربات دانلودر حرفه‌ای - نسخه نهایی با Polling
-# بدون ایمیل + بهینه + پایدار
+# ربات دانلودر حرفه‌ای - از صفر
+# جریان: منو → ساخت حساب → ورود → دانلود (فقط لاگین شده)
+# بدون ایمیل، بدون Gmail API، بی‌نقص
 # ========================================
 
 import os
@@ -12,23 +13,25 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # -------------------------------
-# تنظیمات
+# تنظیمات (تغییر نده)
 # -------------------------------
 TOKEN = os.getenv('TOKEN')
 if not TOKEN:
     raise ValueError("TOKEN رو در Railway بذار!")
 
-DB_PATH = "/tmp/downloads.db"
-DOWNLOAD_FOLDER = "/tmp/downloads"
+DB_PATH = "downloads.db"
+DOWNLOAD_FOLDER = "downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
+# متغیرهای حالت (step) برای هر کاربر
+user_states = {}  # {'user_id': {'step': 'first_name', 'data': {}}}
+
 # -------------------------------
-# دیتابیس
+# دیتابیس (خودکار ساخته می‌شه)
 # -------------------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('PRAGMA journal_mode = WAL;')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -55,48 +58,77 @@ def init_db():
 init_db()
 
 # -------------------------------
-# توابع دیتابیس
+# توابع دیتابیس (بی‌نقص)
 # -------------------------------
 def create_user(user_id, username, first_name, password):
-    with sqlite3.connect(DB_PATH) as conn:
-        try:
-            conn.execute('INSERT INTO users (user_id, username, first_name, password, created_at) VALUES (?, ?, ?, ?, ?)',
-                        (user_id, username, first_name, password, datetime.now().isoformat()))
-            return True
-        except sqlite3.IntegrityError:
-            return False
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT INTO users (user_id, username, first_name, password, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, username, first_name, password, datetime.now().isoformat()))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False  # یوزرنیم تکراری
+    finally:
+        conn.close()
 
 def user_exists(user_id):
-    with sqlite3.connect(DB_PATH) as conn:
-        return conn.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,)).fetchone() is not None
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
 
 def check_login(username, password):
-    with sqlite3.connect(DB_PATH) as conn:
-        return conn.execute('SELECT 1 FROM users WHERE username = ? AND password = ?', (username, password)).fetchone() is not None
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM users WHERE username = ? AND password = ?', (username, password))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
 
 def save_download(user_id, platform, url, title, file_type):
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at) VALUES (?, ?, ?, ?, ?, ?)',
-                    (user_id, platform, url, title, file_type, datetime.now().isoformat()))
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, platform, url, title, file_type, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
 
 def get_user_downloads(user_id, limit=5):
-    with sqlite3.connect(DB_PATH) as conn:
-        return conn.execute('SELECT platform, title, file_type, downloaded_at FROM downloads WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT ?', (user_id, limit)).fetchall()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT platform, title, file_type, downloaded_at
+        FROM downloads WHERE user_id = ?
+        ORDER BY downloaded_at DESC LIMIT ?
+    ''', (user_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
 
 # -------------------------------
-# /start
+# /start — منو اصلی
 # -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("ساخت حساب", callback_data='create')],
         [InlineKeyboardButton("ورود", callback_data='login')],
-        [InlineKeyboardButton("دانلودها", callback_data='downloads')],
+        [InlineKeyboardButton("دانلودهای من", callback_data='downloads')],
         [InlineKeyboardButton("راهنما", callback_data='help')],
     ]
     await update.message.reply_text(
-        "به ربات دانلودر حرفه‌ای خوش اومدی!\n"
-        "ویدیو و آهنگ از هر پلتفرمی دانلود کن\n"
-        "فقط لینک رو بفرست!",
+        "سلام! به ربات دانلودر حرفه‌ای خوش اومدی\n"
+        "اینجا می‌تونی:\n"
+        "ویدیو و اهنگ هر پلتفرمی دانلود کنی\n"
+        "پشتیبانی از تمامی پلتفرم ها : یوتیوب,اینستاگرام,تیک‌تاک,توییتر,فیسبوک,ساندکلود,اسپاتیفای و....\n"
+        "فقط لینک رو بفرست، بقیه‌ش با ماست!",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -113,11 +145,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_exists(user_id):
             await query.edit_message_text("شما قبلاً حساب دارید!")
             return
-        context.user_data.update({'step': 'first_name', 'user_id': user_id})
+        context.user_data.clear()
+        context.user_data['step'] = 'first_name'
+        context.user_data['user_id'] = user_id
         await query.edit_message_text("نام و نام خانوادگی رو بفرست")
 
     elif data == 'login':
-        context.user_data.update({'step': 'username_login'})
+        context.user_data.clear()
+        context.user_data['step'] = 'username_login'
         await query.edit_message_text("یوزرنیم رو بفرست")
 
     elif data == 'downloads':
@@ -126,9 +161,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         downloads = get_user_downloads(user_id)
         if not downloads:
-            await query.edit_message_text("هنوز دانلودی نداری!")
+            await query.edit_message_text("هنوز هیچ دانلودی نداری!")
             return
-        text = "آخرین دانلودها:\n\n"
+        text = "آخرین دانلودهای تو:\n\n"
         for plat, title, ftype, time in downloads:
             icon = "ویدیو" if ftype == "video" else "آهنگ"
             text += f"{icon} {plat}: {title}\n   {time.split('T')[0]}\n\n"
@@ -139,17 +174,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "راهنما:\n"
             "1. حساب بساز (نام + یوزرنیم + پسورد)\n"
             "2. وارد شو\n"
-            "3. لینک اینستاگرام/یوتیوب بفرست"
+            "3. لینک اینستاگرام/یوتیوب بفرست\n"
+            "4. دانلود کن!"
         )
 
 # -------------------------------
-# پیام‌ها
+# پیام‌ها (فرم + دانلود)
 # -------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
     step = context.user_data.get('step')
 
+    # دانلود خودکار (فقط اگر لاگین شده)
     if not step and any(p in text for p in ["instagram.com", "youtube.com", "youtu.be"]) and user_exists(user_id):
         await download_video(update, context, text, user_id)
         return
@@ -158,13 +195,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("از منو شروع کن!")
         return
 
+    # --- ثبت‌نام ---
     if step == 'first_name':
-        context.user_data.update({'first_name': text, 'step': 'username'})
+        context.user_data['first_name'] = text
+        context.user_data['step'] = 'username'
         await update.message.reply_text("یوزرنیم رو بفرست (مثل @mohammad)")
 
     elif step == 'username':
         username = text.lstrip('@')
-        context.user_data.update({'username': username, 'step': 'password'})
+        context.user_data['username'] = username
+        context.user_data['step'] = 'password'
         await update.message.reply_text("پسورد رو بفرست (حداقل ۶ حرف)")
 
     elif step == 'password':
@@ -172,14 +212,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("پسورد کوتاهه! حداقل ۶ حرف")
             return
         if create_user(user_id, context.user_data['username'], context.user_data['first_name'], text):
-            await update.message.reply_text("حساب ساخته شد! حالا لینک بفرست")
+            await update.message.reply_text("حساب ساخته شد! لینک بفرست")
         else:
-            await update.message.reply_text("یوزرنیم تکراریه!")
+            await update.message.reply_text("یوزرنیم تکراریه! دوباره امتحان کن")
             context.user_data['step'] = 'username'
         context.user_data.clear()
 
+    # --- ورود ---
     elif step == 'username_login':
-        context.user_data.update({'username_login': text, 'step': 'password_login'})
+        context.user_data['username_login'] = text
+        context.user_data['step'] = 'password_login'
         await update.message.reply_text("پسورد رو بفرست")
 
     elif step == 'password_login':
@@ -222,15 +264,14 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         await msg.edit_text("خطا: دانلود نشد!")
 
 # -------------------------------
-# اجرای ربات با Polling (پایدار)
+# اجرای ربات
 # -------------------------------
 def main():
-    app = Application.builder().token(TOKEN).concurrent_updates(True).build()
+    app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    
-    print("ربات با Polling فعال شد...")
+    print("ربات دانلودر بدون ایمیل فعال شد...")
     app.run_polling()
 
 if __name__ == '__main__':
