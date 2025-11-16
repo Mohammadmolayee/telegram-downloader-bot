@@ -1,6 +1,6 @@
 # ========================================
-# ربات دانلودر حرفه‌ای - نسخه نهایی بهینه
-# بدون ایمیل + Webhook + بهینه‌سازی کامل
+# ربات دانلودر حرفه‌ای - نسخه نهایی با Polling
+# بدون ایمیل + بهینه + پایدار
 # ========================================
 
 import os
@@ -18,18 +18,17 @@ TOKEN = os.getenv('TOKEN')
 if not TOKEN:
     raise ValueError("TOKEN رو در Railway بذار!")
 
-DB_PATH = "/tmp/downloads.db"  # استفاده از /tmp برای سرعت و پایداری
+DB_PATH = "/tmp/downloads.db"
 DOWNLOAD_FOLDER = "/tmp/downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 # -------------------------------
-# دیتابیس (بهینه‌شده)
+# دیتابیس
 # -------------------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('PRAGMA journal_mode = WAL;')  # سرعت بالا
-    cursor.execute('PRAGMA synchronous = NORMAL;')  # تعادل سرعت/امنیت
+    cursor.execute('PRAGMA journal_mode = WAL;')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -56,15 +55,13 @@ def init_db():
 init_db()
 
 # -------------------------------
-# توابع دیتابیس (سریع و امن)
+# توابع دیتابیس
 # -------------------------------
 def create_user(user_id, username, first_name, password):
     with sqlite3.connect(DB_PATH) as conn:
         try:
-            conn.execute('''
-                INSERT INTO users (user_id, username, first_name, password, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (user_id, username, first_name, password, datetime.now().isoformat()))
+            conn.execute('INSERT INTO users (user_id, username, first_name, password, created_at) VALUES (?, ?, ?, ?, ?)',
+                        (user_id, username, first_name, password, datetime.now().isoformat()))
             return True
         except sqlite3.IntegrityError:
             return False
@@ -79,21 +76,15 @@ def check_login(username, password):
 
 def save_download(user_id, platform, url, title, file_type):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute('''
-            INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, platform, url, title, file_type, datetime.now().isoformat()))
+        conn.execute('INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at) VALUES (?, ?, ?, ?, ?, ?)',
+                    (user_id, platform, url, title, file_type, datetime.now().isoformat()))
 
 def get_user_downloads(user_id, limit=5):
     with sqlite3.connect(DB_PATH) as conn:
-        return conn.execute('''
-            SELECT platform, title, file_type, downloaded_at
-            FROM downloads WHERE user_id = ?
-            ORDER BY downloaded_at DESC LIMIT ?
-        ''', (user_id, limit)).fetchall()
+        return conn.execute('SELECT platform, title, file_type, downloaded_at FROM downloads WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT ?', (user_id, limit)).fetchall()
 
 # -------------------------------
-# /start — منو
+# /start
 # -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -159,7 +150,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     step = context.user_data.get('step')
 
-    # دانلود خودکار
     if not step and any(p in text for p in ["instagram.com", "youtube.com", "youtu.be"]) and user_exists(user_id):
         await download_video(update, context, text, user_id)
         return
@@ -201,7 +191,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['step'] = 'username_login'
 
 # -------------------------------
-# دانلود ویدیو (اینستا + یوتیوب)
+# دانلود ویدیو
 # -------------------------------
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, user_id: int):
     msg = await update.message.reply_text("در حال دانلود... ⏳")
@@ -229,10 +219,10 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         await msg.delete()
 
     except Exception as e:
-        await msg.edit_text(f"خطا: دانلود نشد!")
+        await msg.edit_text("خطا: دانلود نشد!")
 
 # -------------------------------
-# اجرای ربات با Webhook
+# اجرای ربات با Polling (پایدار)
 # -------------------------------
 def main():
     app = Application.builder().token(TOKEN).concurrent_updates(True).build()
@@ -240,13 +230,8 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     
-    PORT = int(os.getenv('PORT', 8000))
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TOKEN,
-        webhook_url=f"https://rare-charisma-bot.up.railway.app/{TOKEN}"
-    )
+    print("ربات با Polling فعال شد...")
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
