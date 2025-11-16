@@ -1,13 +1,14 @@
 # ========================================
 # ربات دانلودر حرفه‌ای - نسخه نهایی
-# منو ۴ دکمه + فرم + ایمیل + ورود + دانلودها
-# فقط کپی کن و آپلود کن
+# منو ۴ دکمه + ثبت‌نام + ورود + دانلود اینستاگرام (فقط برای کاربران لاگین شده)
 # ========================================
 
 import os
 import sqlite3
 import random
 import base64
+import yt_dlp
+import glob
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -24,11 +25,14 @@ GMAIL_CLIENT_ID = os.getenv('GMAIL_CLIENT_ID')
 GMAIL_CLIENT_SECRET = os.getenv('GMAIL_CLIENT_SECRET')
 GMAIL_REFRESH_TOKEN = os.getenv('GMAIL_REFRESH_TOKEN')
 GMAIL_SENDER = os.getenv('GMAIL_SENDER')
+COOKIES_FILE = os.getenv('COOKIES_FILE')  # کوکی اینستاگرام (اختیاری)
 
-if not all([TOKEN, GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_SENDER]):
-    raise ValueError("متغیرهای Gmail رو در Railway بذار!")
+if not TOKEN:
+    raise ValueError("TOKEN رو در Railway بذار!")
 
 DB_PATH = "downloads.db"
+DOWNLOAD_FOLDER = "downloads"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 # -------------------------------
 # دیتابیس
@@ -67,6 +71,9 @@ init_db()
 # ارسال ایمیل
 # -------------------------------
 def send_email(to_email, code):
+    if not all([GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_SENDER]):
+        print("Gmail متغیرها تنظیم نشده")
+        return
     credentials = Credentials(
         token=None,
         refresh_token=GMAIL_REFRESH_TOKEN,
@@ -114,20 +121,21 @@ def check_login(username, password):
     conn.close()
     return exists
 
-def get_user_downloads(user_id, limit=5):
+def is_logged_in(user_id):
+    return user_exists(user_id)
+
+def save_download(user_id, platform, url, title, file_type):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT platform, title, file_type, downloaded_at
-        FROM downloads WHERE user_id = ?
-        ORDER BY downloaded_at DESC LIMIT ?
-    ''', (user_id, limit))
-    rows = cursor.fetchall()
+        INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, platform, url, title, file_type, datetime.now().isoformat()))
+    conn.commit()
     conn.close()
-    return rows
 
 # -------------------------------
-# /start — منو ۴ دکمه
+# /start — منو
 # -------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -158,7 +166,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_exists(user_id):
             await query.edit_message_text("شما قبلاً حساب دارید!")
             return
-        context.user_data.clear()  # پاک کردن قبلی
+        context.user_data.clear()
         context.user_data['step'] = 'first_name'
         context.user_data['user_id'] = user_id
         await query.edit_message_text("نام و نام خانوادگی رو بفرست")
@@ -187,16 +195,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "راهنما:\n"
             "1. حساب بساز\n"
             "2. کد تأیید رو از ایمیل وارد کن\n"
-            "3. لینک بفرست و دانلود کن"
+            "3. لینک اینستاگرام بفرست و دانلود کن"
         )
 
 # -------------------------------
-# پیام‌ها
+# پیام‌ها (فرم + اینستاگرام)
 # -------------------------------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
     step = context.user_data.get('step')
+
+    # اگر در فرم نباشه، چک کن لینک اینستاگرام باشه
+    if not step and "instagram.com" in text:
+        if not user_exists(user_id):
+            await update.message.reply_text("اول حساب بساز یا وارد شو!")
+            return
+        await download_instagram(update, context, text, user_id)
+        return
 
     if not step:
         await update.message.reply_text("از منو شروع کن!")
@@ -242,7 +258,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 email=context.user_data['email'],
                 password=context.user_data['password']
             )
-            await update.message.reply_text("حساب با موفقیت ساخته شد!")
+            await update.message.reply_text("حساب با موفقیت ساخته شد! حالا لینک اینستاگرام بفرست")
             context.user_data.clear()
         else:
             await update.message.reply_text("کد اشتباه! دوباره بفرست")
@@ -255,11 +271,56 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif step == 'password_login':
         if check_login(context.user_data['username_login'], text):
-            await update.message.reply_text("ورود موفق!")
+            await update.message.reply_text("ورود موفق! حالا لینک اینستاگرام بفرست")
             context.user_data.clear()
         else:
             await update.message.reply_text("یوزرنیم یا پسورد اشتباه!")
             context.user_data['step'] = 'username_login'
+
+# -------------------------------
+# دانلود اینستاگرام
+# -------------------------------
+async def download_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, user_id: int):
+    msg = await update.message.reply_text("در حال دانلود از اینستاگرام... ⏳")
+
+    cookies_path = None
+    if COOKIES_FILE:
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
+        tmp.write(COOKIES_FILE)
+        tmp.close()
+        cookies_path = tmp.name
+
+    try:
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best',
+            'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',
+            'noplaylist': True,
+            'cookiefile': cookies_path,
+            'quiet': True,
+            'no_warnings': True,
+            'merge_output_format': 'mp4',
+            'retries': 5,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            video_id = info.get('id')
+            title = info.get('title', 'ویدیو اینستاگرام')
+
+        file_path = glob.glob(f"{DOWNLOAD_FOLDER}/{video_id}.*")[0]
+
+        with open(file_path, 'rb') as f:
+            await update.message.reply_video(f, caption=title)
+
+        save_download(user_id, "Instagram", url, title, "video")
+        os.remove(file_path)
+        await msg.delete()
+
+    except Exception as e:
+        await msg.edit_text(f"خطا: {str(e)[:100]}")
+    finally:
+        if cookies_path and os.path.exists(cookies_path):
+            os.unlink(cookies_path)
 
 # -------------------------------
 # اجرای ربات
@@ -269,7 +330,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-    print("ربات دانلودر با منو کامل فعال شد...")
+    print("ربات دانلودر با اینستاگرام فعال شد...")
     app.run_polling()
 
 if __name__ == '__main__':
