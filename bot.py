@@ -266,7 +266,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     
     # اول این: فقط دکمه "show_menu" رو بگیره
-    app.add_handler(CallbackQueryHandler(show_menu, pattern="^show_menu$"))
+ 
     
     # بعد این: بقیه دکمه‌ها (my_downloads, my_stats, logout و ...)
     app.add_handler(CallbackQueryHandler(button_handler))
