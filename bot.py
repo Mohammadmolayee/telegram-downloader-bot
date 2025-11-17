@@ -17,8 +17,8 @@ TOKEN = os.getenv("TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # اختیاری
 GITHUB_REPO = "Mohammadmolayee/telegram-downloader-bot"  # مخزن تو
 
-DB_PATH = "downloads.db"
-DOWNLOAD_FOLDER = "downloads"
+DB_PATH = "/app/downloads.db"
+DOWNLOAD_FOLDER = "/app/downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 MAX_GUEST_DOWNLOADS_PER_DAY = 10
