@@ -262,10 +262,17 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url
 # اجرا
 def main():
     app = Application.builder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
+    
+    # اول این: فقط دکمه "show_menu" رو بگیره
     app.add_handler(CallbackQueryHandler(show_menu, pattern="^show_menu$"))
-    app.add_handler(CallbackQueryHandler(button_handler))  # فقط دکمه‌های غیر از show_menu
+    
+    # بعد این: بقیه دکمه‌ها (my_downloads, my_stats, logout و ...)
+    app.add_handler(CallbackQueryHandler(button_handler))
+    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    
     print("ربات دانلودر نهایی و کامل فعال شد...")
     app.run_polling()
 
