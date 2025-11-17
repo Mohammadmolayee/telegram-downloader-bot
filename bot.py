@@ -1,6 +1,6 @@
 # ========================================
-# ربات دانلودر حرفه‌ای - نسخه نهایی و بدون خطا
-# بدون حساب + با حساب + منو + UI زیبا + 100% کار می‌کنه
+# ربات دانلودر حرفه‌ای - نسخه نهایی و 100% بدون خطا
+# بدون حساب + با حساب + منو + UI زیبا
 # ========================================
 
 import os
@@ -89,41 +89,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "سلام! به ربات دانلودر حرفه‌ای خوش اومدی\n\n"
         "ویدیو و آهنگ از یوتیوب، اینستاگرام، تیک‌تاک و همه جا دانلود کن\n\n"
         "فقط لینک رو بفرست تا دانلود کنم!\n"
-        "برای امکانات بیشتر (ذخیره دانلودها و ...) دکمه زیر رو بزن",
+        "برای امکانات بیشتر (ذخیره دانلودها، لیست دانلودها و ...) دکمه زیر رو بزن",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 # -------------------------------
-# منوی اصلی (دکمه‌ها)
+# دکمه‌ها
 # -------------------------------
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-
-    if query.data == 'main_menu':
-        kb = [
-            [InlineKeyboardButton("ساخت حساب", callback_data='create')],
-            [InlineKeyboardButton("ورود", callback_data='login')],
-            [InlineKeyboardButton("راهنما", callback_data='help')],
-        ]
-        await query.edit_message_text("منو اصلی\nانتخاب کن:", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif query.data == 'create':
-        if user_exists(user_id):
-            await query.edit_message_text("شما قبلاً حساب دارید!")
-            return
-        context.user_data['step'] = 'create_name'
-        await query.edit_message_text("نام و نام خانوادگی رو بفرست")
-
-    elif query.data == 'login':
-        context.user_data['step'] = 'login_user'
-        await query.edit_message_text("یوزرنیم رو بفرست")
-
-    elif query.data == 'help':
-        await query.edit_message_text(
-            "راهنما\n\n"
-            "ساخت حساب:\n"
-            "• یوزرنیم: بدون @، حداقل ۳ حرف (مثل ali123)\n"
-            "• پسورد: ۸-۱۲ حرف و عدد (مثل Pass1234)\n\n"
-            "دانلود
+async def button_handler(update: Update,
