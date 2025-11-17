@@ -1,20 +1,11 @@
-# ========================================
-# ربات دانلودر حرفه‌ای - نسخه فیکس شده
-# بدون حساب دانلود کن + با حساب دکمه‌ها + UI زیبا
-# ========================================
-
 import os
 import sqlite3
-import hashlib  # هش پسورد
 import yt_dlp
 import glob
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# -------------------------------
-# تنظیمات
-# -------------------------------
 TOKEN = os.getenv('TOKEN')
 if not TOKEN:
     raise ValueError("TOKEN رو در Railway بذار!")
@@ -151,6 +142,22 @@ async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # -------------------------------
+# راهنما
+# -------------------------------
+async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "راهنما ❓\n\n"
+        "👤 **ساخت حساب**: نام + یوزرنیم (بدون @, مثل mohammad) + پسورد (۸-۱۲ حرف/عدد, مثل MyPass123)\n"
+        "🔐 **ورود**: یوزرنیم و پسورد\n"
+        "📱 **دانلود**: بعد از ورود، لینک اینستاگرام/یوتیوب بفرست\n"
+        "📂 **دانلودهای من**: لیست اخیرت رو ببین\n\n"
+        "💡 نکته: بدون حساب هم می‌تونی لینک بفرستی و دانلود کنی (بدون ذخیره)\n\n"
+        "برای شروع، /start بزن!"
+    )
+
+# -------------------------------
 # دکمه "ساخت حساب" — فرم ۳ فیلد
 # -------------------------------
 async def create_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -190,7 +197,10 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = context.user_data['username']
     first_name = context.user_data['first_name']
     if create_user(user_id, username, first_name, text):
-        await update.message.reply_text("حساب با موفقیت ساخته شد! 🎉\n\nبرای ادامه، /start بزن و 'ورود' رو انتخاب کن")
+        await update.message.reply_text(
+            "حساب با موفقیت ساخته شد! 🎉\n\n"
+            "حالا برای ورود، /start بزن و 'ورود به حساب' رو انتخاب کن"
+        )
     else:
         await update.message.reply_text("یوزرنیم تکراریه! از اول شروع کن (/start)")
     context.user_data.clear()
@@ -218,7 +228,8 @@ async def get_login_password(update: Update, context: ContextTypes.DEFAULT_TYPE)
     username = context.user_data['username_login']
     if check_login(username, text):
         await update.message.reply_text(
-            "ورود موفق! 🎉\n\nبه پنل کاربریت خوش اومدی 👤\n"
+            "ورود موفق! 🎉\n\n"
+            "به پنل کاربریت خوش اومدی 👤\n"
             "می‌تونی هر چی می‌خوای دانلود کنی\n\n"
             "💡 برای دانلود، لینک رو بفرست\n"
             "🔧 برای خدمات بیشتر، /start بزن"
@@ -241,7 +252,8 @@ async def help_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔐 **ورود**: یوزرنیم و پسورد\n"
         "📱 **دانلود**: بعد از ورود، لینک اینستاگرام/یوتیوب بفرست\n"
         "📂 **دانلودهای من**: لیست اخیرت رو ببین\n\n"
-        "💡 نکته: بدون حساب هم می‌تونی لینک بفرستی و دانلود کنی (بدون ذخیره)"
+        "💡 نکته: بدون حساب هم می‌تونی لینک بفرستی و دانلود کنی (بدون ذخیره)\n\n"
+        "برای شروع، /start بزن!"
     )
 
 # -------------------------------
@@ -251,4 +263,47 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     url = update.message.text.strip()
 
-    # اگر لاگین نشده
+    if not user_exists(user_id):
+        await update.message.reply_text("لینک بفرست تا دانلود کنم! (بدون حساب هم می‌تونی دانلود کنی)")
+        return
+
+    msg = await update.message.reply_text("در حال دانلود... ⏳")
+    platform = "YouTube" if "youtube" in url or "youtu.be" in url else "Instagram"
+    
+    try:
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best',
+            'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',
+            'noplaylist': True,
+            'quiet': True,
+            'merge_output_format': 'mp4',
+            'retries': 3,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = glob.glob(f"{DOWNLOAD_FOLDER}/{info.get('id')}.*")[0]
+            title = info.get('title', 'ویدیو')
+
+        with open(file_path, 'rb') as f:
+            await update.message.reply_video(f, caption=f"{platform}: {title}")
+
+        save_download(user_id, platform, url, title, "video")
+        os.remove(file_path)
+        await msg.delete()
+
+    except Exception as e:
+        await msg.edit_text("خطا: دانلود نشد!")
+
+# -------------------------------
+# اجرای ربات با Polling
+# -------------------------------
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    print("ربات دانلودر بدون ایمیل فعال شد...")
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
