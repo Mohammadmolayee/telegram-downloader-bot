@@ -99,8 +99,8 @@ def get_recent_downloads(uid, limit=15):
 # ================= پیام خوش‌آمدگویی (/start) =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🏠منوی اصلی", callback_data="main_menu")],
-        [InlineKeyboardButton("راهنم📃ا", callback_data="help")]
+        [InlineKeyboardButton("منوی اصلی🏠", callback_data="main_menu")],
+        [InlineKeyboardButton("راهنما📃", callback_data="help")]
     ]
     await update.message.reply_text(
         "به بات دانلودر حرفه‌ای خوش آمدید!🌹\n"
@@ -118,16 +118,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = qry.data
 
     # دکمه برگشت به منوی اصلی (همه جا استفاده میشه)
-    back_btn = [[InlineKeyboardButton("🏠برگشت به منوی اصلی", callback_data="main_menu")]]
+    back_btn = [[InlineKeyboardButton("برگشت به منوی اصلی🏠", callback_data="main_menu")]]
 
     # راهنما
     if data == "help":
         await qry.edit_message_text(
-            "😊با سلام و درود خدمت شما کاربر عزیز!\n\n"
-            "🤖شما هم اکنون به بهترین ربات دانلودر تلگرامی مراجعه کردید\n"
-            "😉شما می‌توانید با کلیک روی «منوی اصلی» و طی چند مرحله ساده، حساب کاربری بسازید و از امکانات نامحدود بهره‌مند شوید\n"
-            "🤫یا بدون ساخت حساب به صورت محدود از ربات استفاده کنید\n\n"
-            "با تشکر از همراهی شم🙏ا",
+            "با سلام و درود خدمت شما کاربر عزیز!😊\n\n"
+            "شما هم اکنون به بهترین ربات دانلودر تلگرامی مراجعه کردید🤖\n"
+            "شما می‌توانید با کلیک روی «منوی اصلی» و طی چند مرحله ساده، حساب کاربری بسازید و از امکانات نامحدود بهره‌مند شوید🙂‍↕️\n"
+            "یا بدون ساخت حساب به صورت محدود از ربات استفاده کنید🤫\n\n"
+            "با تشکر از همراهی شماا🙏",
             reply_markup=InlineKeyboardMarkup(back_btn)
         )
 
@@ -136,22 +136,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_exists(uid):
             user = get_user(uid)
             await qry.edit_message_text(
-                f"🌹به پنل کاربری خود خوش آمدید {user[0]}!\n"
-                "❓️چه کاری می‌خواهید انجام بدید؟",
+                f"به پنل کاربری خود خوش آمدید {user[0]}!🌹\n"
+                "چه کاری می‌خواهید انجام بدید؟",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥دانلودهای اخیر (۲۴ ساعت)", callback_data="my_downloads")],
-                    [InlineKeyboardButton("📊آمار دانلودهای من", callback_data="my_stats")],
-                    [InlineKeyboardButton("راهنم📃ا", callback_data="help")],
-                    [InlineKeyboardButton("📱خروج از حساب کاربری", callback_data="logout")],
+                    [InlineKeyboardButton("دانلودهای اخیر (۲۴ ساعت)📥", callback_data="my_downloads")],
+                    [InlineKeyboardButton("آمار دانلودهای من📊", callback_data="my_stats")],
+                    [InlineKeyboardButton("راهنما📃", callback_data="help")],
+                    [InlineKeyboardButton("خروج از حساب کاربری📱", callback_data="logout")],
                     back_btn[0]
                 ])
             )
         else:
             await qry.edit_message_text(
-                "☺️سپاس از شما که عضو مجموعه ما می‌شوید!\n"
-                "📲برای ادامه حساب کاربری خود را بسازید",
+                "سپاس از شما که عضو مجموعه ما می‌شوید!🫡\n"
+                "برای ادامه حساب کاربری خود را بسازید📲",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📲ساخت حساب کاربری", callback_data="register")],
+                    [InlineKeyboardButton("ساخت حساب کاربری📲", callback_data="register")],
                     back_btn[0]
                 ])
             )
@@ -159,7 +159,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # شروع ثبت‌نام
     elif data == "register":
         if user_exists(uid):
-            await qry.edit_message_text("😉شما قبلاً حساب دارید!کاربرعزیز", reply_markup=InlineKeyboardMarkup(back_btn))
+            await qry.edit_message_text("شما قبلاً حساب دارید!کاربرعزیز😉", reply_markup=InlineKeyboardMarkup(back_btn))
             return
         context.user_data["step"] = "get_name"
         await qry.edit_message_text("لطفاً نام و نام خانوادگی خود را وارد کنید", reply_markup=InlineKeyboardMarkup(back_btn))
@@ -168,9 +168,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "my_downloads":
         downloads = get_recent_downloads(uid, 15)
         if not downloads:
-            text = "📥هنوز هیچ دانلودی در ۲۴ ساعت اخیر ندارید!"
+            text = "هنوز هیچ دانلودی در ۲۴ ساعت اخیر ندارید!📥"
         else:
-            text = "📥دانلودهای اخیر شما (۲۴ ساعت):\n\n"
+            text = "دانلودهای اخیر شما (۲۴ ساعت)📥:\n\n"
             for plat, title, dt in downloads:
                 time = dt[11:16]
                 text += f"{plat} | {time}\n{title}\n\n"
@@ -182,9 +182,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = get_user(uid)
         last = user[2][11:16] if user and user[2] else "نامشخص"
         await qry.edit_message_text(
-            f"📊آمار دانلودهای شما\n\n"
-            f"📥تعداد دانلودهای ۲۴ ساعت اخیر: {total}\n"
-            f"👁آخرین بازدید: {last}\n"
+            f"آمار دانلودهای شما📊\n\n"
+            f"تعداد دانلودهای ۲۴ ساعت اخیر📥: {total}\n"
+            f"آخرین بازدید👁: {last}\n"
             f"وضعیت: نامحدود",
             reply_markup=InlineKeyboardMarkup(back_btn)
         )
@@ -192,8 +192,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # خروج از حساب
     elif data == "logout":
         await qry.edit_message_text(
-            "🥺از حساب کاربری خود خارج شدید کاربر عزیز\n"
-            "😁برای ورود دوباره لطفاً /start را بزنید",
+            "از حساب کاربری خود خارج شدید کاربر عزیز🥺\n"
+            "برای ورود دوباره لطفاً /start را بزنید😁",
             reply_markup=InlineKeyboardMarkup(back_btn)
         )
 
@@ -205,7 +205,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # تشخیص لینک و دانلود
     if any(x in text for x in ["youtube.com", "youtu.be", "instagram.com", "tiktok.com", "twitter.com", "x.com"]):
         if not user_exists(uid) and get_today_count(uid) >= MAX_GUEST_DOWNLOADS_PER_DAY:
-            await update.message.reply_text("😉امروز به سقف دانلود رسیدید!\nحساب بسازید تا نامحدود شود")
+            await update.message.reply_text("امروز به سقف دانلود رسیدید!\nحساب بسازید تا نامحدود شود🙂‍↕️")
             return
         await download_video(update, context, text, uid)
         return
@@ -233,17 +233,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         if create_user(uid, context.user_data["name"], context.user_data["username"], text):
             await update.message.reply_text(
-                "👍🏻حساب کاربری شما با موفقیت ساخته شد!\n"
-                "🫡برای ورود به پنل خود لطفاً /start را بزنید",
+                "حساب کاربری شما با موفقیت ساخته شد!👍🏻\n"
+                "برای ورود به پنل خود لطفاً /start را بزنید😉",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("ورود به پنل", callback_data="main_menu")]])
             )
         else:
-            await update.message.reply_text("🥱این یوزرنیم قبلاً استفاده شده!")
+            await update.message.reply_text("این یوزرنیم قبلاً استفاده شده!🥱")
         context.user_data.clear()
 
 # ================= دانلود ویدیو =================
 async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, uid: int):
-    msg = await update.message.reply_text("📥در حال دانلود...")
+    msg = await update.message.reply_text("در حال دانلود...📥")
     platform = "YouTube" if "youtube" in url or "youtu.be" in url else "اینستاگرام/تیک‌تاک"
 
     try:
@@ -266,7 +266,7 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         os.remove(file)
         await msg.delete()
     except Exception as e:
-        await msg.edit_text("⛓️‍💥دانلود نشد! لینک را چک کنید یا دوباره امتحان کنید")
+        await msg.edit_text("دانلود نشد! لینک را چک کنید یا دوباره امتحان کنید⛓️‍💥")
 
 # ================= اجرای ربات =================
 def main():
