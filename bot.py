@@ -196,17 +196,22 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------
 # MAIN
 # ---------------------
-async def main():
+
+def main():
     app = Application.builder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
 
-    asyncio.create_task(download_worker(app.bot))
+    # شروع worker دانلود (بدون asyncio.run)
+    app.create_task(download_worker(app.bot))
 
+    # هندلرها
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel_"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.run_polling()
+    # اجرای polling (بدون async)
+    app.run_polling()
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
