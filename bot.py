@@ -1,19 +1,19 @@
-# bot.py — main entry
+# bot.py — main entry (fixed: start background tasks in post_init)
 import os
-import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
+# local modules
 from db import (
     init_db, create_user, user_exists, get_user_by_username,
     get_user_lang, set_user_lang, get_user_downloads,
     get_user_stats, get_daily_download_count
 )
 from messages import TEXTS, LANG_OPTIONS
-from downloader import enqueue_download, start_background_workers
+import downloader  # contains enqueue_download, worker_loop, cleanup_loop
 
 # ---------------- settings ----------------
 TOKEN = os.getenv("TOKEN")
@@ -36,15 +36,6 @@ def t(user_id: int, key: str, *a, **kw):
 # --- Handlers ---
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    kb = [
-        [InlineKeyboardButton(TEXTS['fa']['btn_create'], callback_data='create_account')],
-        [InlineKeyboardButton(TEXTS['fa']['btn_login'], callback_data='login')],
-        [InlineKeyboardButton(TEXTS['fa']['btn_my_downloads'], callback_data='my_downloads')],
-        [InlineKeyboardButton(TEXTS['fa']['btn_my_stats'], callback_data='my_stats')],
-        [InlineKeyboardButton(TEXTS['fa']['btn_set_lang'], callback_data='set_lang')],
-        [InlineKeyboardButton(TEXTS['fa']['btn_help'], callback_data='help')],
-    ]
-    # If user exists, show in their language
     lang = get_user_lang(user_id)
     kb = [
         [InlineKeyboardButton(TEXTS[lang]['btn_create'], callback_data='create_account')],
@@ -220,10 +211,7 @@ async def lang_selected_callback(update: Update, context: ContextTypes.DEFAULT_T
     await q.answer()
     await q.edit_message_text(TEXTS[code]['lang_changed'])
 
-# enqueue download (text messages) — uses downloader.enqueue_download
-# enqueue_download returns immediate confirmation to user
-# already implemented in downloader.py
-# admin stats command
+# admin stats
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ADMIN_ID and update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⚠️ فقط ادمین می‌تواند این دستور را اجرا کند.")
@@ -241,7 +229,15 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------- main -----------------
 def main():
     init_db()
-    app = Application.builder().token(TOKEN).build()
+
+    # post_init will be called once the app is started and the loop is running.
+    async def post_init(application: Application) -> None:
+        # schedule background tasks under running loop
+        application.create_task(downloader.worker_loop(application))
+        application.create_task(downloader.cleanup_loop())
+        logger.info("Background tasks scheduled (worker_loop & cleanup_loop).")
+
+    app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     # basic handlers
     app.add_handler(CommandHandler("start", start_handler))
@@ -254,7 +250,7 @@ def main():
     app.add_handler(CallbackQueryHandler(set_lang_callback, pattern='^set_lang$'))
     app.add_handler(CallbackQueryHandler(lang_selected_callback, pattern='^lang:'))
 
-    # conversation for signup/login
+    # Conversation for signup/login
     reg_conv = ConversationHandler(
         entry_points=[],
         states={
@@ -269,13 +265,10 @@ def main():
     app.add_handler(reg_conv)
 
     # enqueue download (text messages)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, enqueue_download))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, downloader.enqueue_download))
 
     # admin
     app.add_handler(CommandHandler("stats", stats_command))
-
-    # background workers (queue worker + cleanup)
-    start_background_workers(app)
 
     logger.info("Bot starting (polling)...")
     app.run_polling()
