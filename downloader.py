@@ -1,119 +1,64 @@
-# downloader.py — queue, worker, yt-dlp logic (fixed)
-import os
-import glob
-import asyncio
-import logging
-from typing import Tuple
-import yt_dlp
-from telegram.ext import Application
-from db import save_download
+# downloader.py
 
-DOWNLOAD_FOLDER = "downloads"
-MAX_VIDEO_SIZE_DOC = 50 * 1024 * 1024
+import os
+import yt_dlp
+import asyncio
+from config import DOWNLOAD_FOLDER
+from db import add_download
+
+queue = {}        # صف دانلود
+cancel_flags = {} # وضعیت لغو هر دانلود
+
+# ساخت پوشه دانلود
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-logger = logging.getLogger(__name__)
 
-# in-memory queue (asyncio.Queue)
-download_queue: asyncio.Queue = asyncio.Queue()
-
-async def enqueue_download(update, context):
-    """MessageHandler will call this: adds (update,user,url) to queue and confirms."""
-    url = (update.message.text or "").strip()
-    user_id = update.message.from_user.id
-    lang = context.user_data.get('lang') or 'fa'
-    if not url:
-        await update.message.reply_text("لینک نامعتبر است.")
-        return
-    # guest limit check could be added by inspecting DB (kept simple here)
-    await download_queue.put((update, user_id, url))
-    await update.message.reply_text("✅ لینک شما به صف اضافه شد. لطفاً صبور باشید.")
-
-async def _process_item(app: Application, update, user_id: int, url: str):
-    chat_id = update.effective_chat.id
-    status_msg = await app.bot.send_message(chat_id=chat_id, text="⏳ در حال پردازش دانلود...")
-    file_path = None
-    try:
-        lower = url.lower()
-        is_audio = any(x in lower for x in ("soundcloud", "spotify")) or lower.endswith(('.mp3', '.wav'))
-        if is_audio:
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',
-                'quiet': True, 'noplaylist': True, 'retries': 3
-            }
-        else:
-            ydl_opts = {
-                'format': 'bestvideo[height<=720]+bestaudio/best/best',
-                'outtmpl': f'{DOWNLOAD_FOLDER}/%(id)s.%(ext)s',
-                'merge_output_format': 'mp4',
-                'quiet': True, 'noplaylist': True, 'retries': 3
-            }
-        info = None
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-        if not info:
-            await app.bot.edit_message_text("❌ دانلود ناموفق: اطلاعات دریافت نشد.", chat_id, status_msg.message_id)
-            return
-        file_pattern = f"{DOWNLOAD_FOLDER}/{info.get('id')}.*"
-        matches = glob.glob(file_pattern)
-        if not matches:
-            matches = sorted(glob.glob(f"{DOWNLOAD_FOLDER}/*"), key=os.path.getmtime, reverse=True)[:1]
-        if not matches:
-            await app.bot.edit_message_text("❌ خطا: فایل دانلود شده پیدا نشد.", chat_id, status_msg.message_id)
-            return
-        file_path = matches[0]
-        title = info.get('title') or os.path.basename(file_path)
-        file_size = os.path.getsize(file_path)
-        if is_audio or file_size > MAX_VIDEO_SIZE_DOC:
-            with open(file_path, 'rb') as f:
-                await app.bot.send_document(chat_id, f, caption=f"🔹 {title}")
-            save_download(user_id, 'Audio' if is_audio else 'Video', url, title, 'audio' if is_audio else 'video', file_size)
-        else:
-            with open(file_path, 'rb') as f:
-                await app.bot.send_video(chat_id, f, caption=f"🔹 {title}")
-            save_download(user_id, 'Video', url, title, 'video', file_size)
-    except Exception as e:
-        logger.exception("error processing download")
-        try:
-            await app.bot.edit_message_text(f"❌ خطا در دانلود: {e}", chat_id, status_msg.message_id)
-        except Exception:
-            pass
-    finally:
-        # cleanup local file
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception:
-                pass
-        try:
-            await app.bot.delete_message(chat_id, status_msg.message_id)
-        except Exception:
-            pass
-
-async def worker_loop(app: Application):
-    """Continuously process items from queue. app must be running (i.e., called from post_init)."""
+async def download_worker(bot):
+    """کارگر دانلود که همیشه در پس‌زمینه اجرا می‌شود"""
     while True:
+        if not queue:
+            await asyncio.sleep(0.5)
+            continue
+
+        user_id, task = queue.popitem()
+
+        if cancel_flags.get(user_id):
+            cancel_flags[user_id] = False
+            continue
+
+        url = task["url"]
+        chat_id = task["chat_id"]
+
         try:
-            update, user_id, url = await download_queue.get()
-            await _process_item(app, update, user_id, url)
-            download_queue.task_done()
-        except Exception:
-            logger.exception("worker crashed; sleeping 1s")
-            await asyncio.sleep(1)
+            await bot.send_message(chat_id, "⏳ دانلود آغاز شد...")
 
-async def cleanup_loop():
-    """Periodically remove old files from downloads folder."""
-    import time
-    while True:
-        now = time.time()
-        for path in glob.glob(f"{DOWNLOAD_FOLDER}/*"):
+            ydl_opts = {
+                "format": "bestvideo[height<=720]+bestaudio/best[height<=720]",
+                "outtmpl": f"{DOWNLOAD_FOLDER}/%(id)s.%(ext)s",
+                "quiet": True
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+
+            await bot.send_video(chat_id, open(filename, "rb"))
+            add_download(user_id)
+
+            os.remove(filename)
+
+        except Exception as e:
             try:
-                if now - os.path.getmtime(path) > 600:
-                    os.remove(path)
-            except Exception:
+                await bot.send_message(chat_id, f"❌ خطا در دانلود: {e}")
+            except:
                 pass
-        await asyncio.sleep(300)
 
-# note: DO NOT call app.create_task(...) at import time.
-# The tasks should be scheduled from bot.py.post_init(...) where the loop is running.
+
+def add_to_queue(user_id, chat_id, url):
+    """افزودن به صف"""
+    queue[user_id] = {"url": url, "chat_id": chat_id}
+
+
+def cancel_download(user_id):
+    """لغو دانلود"""
+    cancel_flags[user_id] = True
