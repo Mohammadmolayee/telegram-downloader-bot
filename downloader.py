@@ -1,4 +1,4 @@
-# downloader.py — queue, worker, yt-dlp logic
+# downloader.py — queue, worker, yt-dlp logic (fixed)
 import os
 import glob
 import asyncio
@@ -14,22 +14,25 @@ os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
+# in-memory queue (asyncio.Queue)
 download_queue: asyncio.Queue = asyncio.Queue()
 
 async def enqueue_download(update, context):
+    """MessageHandler will call this: adds (update,user,url) to queue and confirms."""
     url = (update.message.text or "").strip()
     user_id = update.message.from_user.id
+    lang = context.user_data.get('lang') or 'fa'
     if not url:
-        lang = context.user_data.get('lang') or 'fa'
         await update.message.reply_text("لینک نامعتبر است.")
         return
+    # guest limit check could be added by inspecting DB (kept simple here)
     await download_queue.put((update, user_id, url))
-    # quick confirmation text (use user's lang if available)
     await update.message.reply_text("✅ لینک شما به صف اضافه شد. لطفاً صبور باشید.")
 
 async def _process_item(app: Application, update, user_id: int, url: str):
     chat_id = update.effective_chat.id
     status_msg = await app.bot.send_message(chat_id=chat_id, text="⏳ در حال پردازش دانلود...")
+    file_path = None
     try:
         lower = url.lower()
         is_audio = any(x in lower for x in ("soundcloud", "spotify")) or lower.endswith(('.mp3', '.wav'))
@@ -77,16 +80,19 @@ async def _process_item(app: Application, update, user_id: int, url: str):
         except Exception:
             pass
     finally:
-        try:
-            os.remove(file_path)
-        except Exception:
-            pass
+        # cleanup local file
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
         try:
             await app.bot.delete_message(chat_id, status_msg.message_id)
         except Exception:
             pass
 
 async def worker_loop(app: Application):
+    """Continuously process items from queue. app must be running (i.e., called from post_init)."""
     while True:
         try:
             update, user_id, url = await download_queue.get()
@@ -97,7 +103,8 @@ async def worker_loop(app: Application):
             await asyncio.sleep(1)
 
 async def cleanup_loop():
-    import glob, os, time
+    """Periodically remove old files from downloads folder."""
+    import time
     while True:
         now = time.time()
         for path in glob.glob(f"{DOWNLOAD_FOLDER}/*"):
@@ -108,7 +115,5 @@ async def cleanup_loop():
                 pass
         await asyncio.sleep(300)
 
-def start_background_workers(app: Application):
-    # create background tasks for worker + cleanup
-    app.create_task(worker_loop(app))
-    app.create_task(cleanup_loop())
+# note: DO NOT call app.create_task(...) at import time.
+# The tasks should be scheduled from bot.py.post_init(...) where the loop is running.
