@@ -1,277 +1,212 @@
-# bot.py — main entry (fixed: start background tasks in post_init)
-import os
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+# bot.py
+# فایل اصلی ربات
+
+import asyncio
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes, ConversationHandler
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
 )
-# local modules
+
+from messages import get_message
 from db import (
-    init_db, create_user, user_exists, get_user_by_username,
-    get_user_lang, set_user_lang, get_user_downloads,
-    get_user_stats, get_daily_download_count
+    init_db,
+    create_user,
+    check_login,
+    get_user_language,
+    set_language,
+    count_downloads_today
 )
-from messages import TEXTS, LANG_OPTIONS
-import downloader  # contains enqueue_download, worker_loop, cleanup_loop
+from config import GUEST_LIMIT, USER_LIMIT
+from utils import detect_platform
+from downloader import add_to_queue, cancel_download, download_worker
 
-# ---------------- settings ----------------
-TOKEN = os.getenv("TOKEN")
-if not TOKEN:
-    raise RuntimeError("توکن ربات را در ENV با نام TOKEN قرار دهید.")
+# مقداردهی دیتابیس
+init_db()
 
-ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
+# ---------------------
+# دکمه‌های اولیه
+# ---------------------
 
-# logging
-logging.basicConfig(format='[%(asctime)s] %(levelname)s: %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
+def keyboard_start(lang):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📚 راهنما", callback_data="help")],
+        [InlineKeyboardButton("📂 منوی اصلی", callback_data="menu")],
+        [InlineKeyboardButton("🌐 تغییر زبان", callback_data="lang")]
+    ])
 
-# Conversation states
-(REG_FIRSTNAME, REG_USERNAME, REG_PASSWORD, LOGIN_USERNAME, LOGIN_PASSWORD) = range(5)
 
-def t(user_id: int, key: str, *a, **kw):
-    lang = get_user_lang(user_id)
-    return TEXTS.get(lang, TEXTS['en'])[key].format(*a, **kw)
+def keyboard_main_menu(lang):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⭐ ساخت حساب", callback_data="register")],
+        [InlineKeyboardButton("🔐 ورود", callback_data="login")],
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data="back_home")],
+    ])
 
-# --- Handlers ---
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
-    kb = [
-        [InlineKeyboardButton(TEXTS[lang]['btn_create'], callback_data='create_account')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_login'], callback_data='login')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_my_downloads'], callback_data='my_downloads')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_my_stats'], callback_data='my_stats')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_set_lang'], callback_data='set_lang')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_help'], callback_data='help')],
-    ]
-    await update.message.reply_text(TEXTS[lang]['welcome'], reply_markup=InlineKeyboardMarkup(kb))
 
-async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    kb = [
-        [InlineKeyboardButton(TEXTS[lang]['btn_create'], callback_data='create_account')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_login'], callback_data='login')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_my_downloads'], callback_data='my_downloads')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_my_stats'], callback_data='my_stats')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_set_lang'], callback_data='set_lang')],
-        [InlineKeyboardButton(TEXTS[lang]['btn_help'], callback_data='help')],
-    ]
-    await q.answer()
-    await q.edit_message_text(TEXTS[lang]['menu_title'], reply_markup=InlineKeyboardMarkup(kb))
+def keyboard_languages():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")],
+        [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")],
+        [InlineKeyboardButton("⬅️ بازگشت", callback_data="start")]
+    ])
 
-async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    await q.answer()
-    await q.edit_message_text(TEXTS[lang]['help_text'])
 
-# create account flow
-async def create_account_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    await q.answer()
-    if user_exists(user_id):
-        await q.edit_message_text(TEXTS[lang]['create_already'])
-        return
-    context.user_data.clear()
-    await q.edit_message_text(TEXTS[lang]['create_prompt_name'])
-    return
-
-async def reg_firstname(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
-    text = (update.message.text or "").strip()
-    if not text:
-        await update.message.reply_text(TEXTS[lang]['create_prompt_name'])
-        return REG_FIRSTNAME
-    context.user_data['first_name'] = text
-    await update.message.reply_text(TEXTS[lang]['create_prompt_username'])
-    return REG_USERNAME
-
-async def reg_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
-    text = (update.message.text or "").strip()
-    if text.startswith('@'):
-        text = text[1:]
-    if len(text) < 3:
-        await update.message.reply_text(TEXTS[lang]['create_prompt_username'])
-        return REG_USERNAME
-    if get_user_by_username(text):
-        await update.message.reply_text(TEXTS[lang]['create_fail'])
-        return REG_USERNAME
-    context.user_data['username'] = text
-    await update.message.reply_text(TEXTS[lang]['create_prompt_password'])
-    return REG_PASSWORD
-
-async def reg_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
-    text = (update.message.text or "").strip()
-    if not (8 <= len(text) <= 12 and text.isalnum()):
-        await update.message.reply_text(TEXTS[lang]['create_prompt_password'])
-        return REG_PASSWORD
-    username = context.user_data.get('username')
-    first_name = context.user_data.get('first_name')
-    ok = create_user(user_id, username, first_name, text, lang)
-    context.user_data.clear()
-    if ok:
-        await update.message.reply_text(TEXTS[lang]['create_success'])
-    else:
-        await update.message.reply_text(TEXTS[lang]['create_fail'])
-    return ConversationHandler.END
-
-# login flow
-async def login_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    await q.answer()
-    context.user_data.clear()
-    await q.edit_message_text(TEXTS[lang]['login_prompt_username'])
-    return
-
-async def login_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
-    if text.startswith('@'):
-        text = text[1:]
-    context.user_data['login_username'] = text
-    user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
-    await update.message.reply_text(TEXTS[lang]['login_prompt_password'])
-    return LOGIN_PASSWORD
-
-async def login_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_user_lang(user_id)
-    text = (update.message.text or "").strip()
-    username = context.user_data.get('login_username')
-    row = get_user_by_username(username)
-    context.user_data.clear()
-    if not row:
-        await update.message.reply_text(TEXTS[lang]['login_fail'])
-        return ConversationHandler.END
-    stored_hash = row[3]
-    if stored_hash and (isinstance(stored_hash, (bytes, bytearray)) and __import__('bcrypt').checkpw(text.encode(), stored_hash)):
-        await update.message.reply_text(TEXTS[lang]['login_success'])
-    else:
-        await update.message.reply_text(TEXTS[lang]['login_fail'])
-    return ConversationHandler.END
-
-# my downloads & stats
-async def my_downloads_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    await q.answer()
-    rows = get_user_downloads(user_id, limit=10)
-    if not rows:
-        await q.edit_message_text(TEXTS[lang]['no_downloads'])
-        return
-    lines = [TEXTS[lang]['my_downloads_header']]
-    for platform, title, file_type, file_size, downloaded_at in rows:
-        mb = file_size / (1024*1024) if file_size else 0
-        lines.append(f"• {platform} — {title}\n  {TEXTS[lang]['label_type']}: {file_type} — {mb:.2f} MB — {downloaded_at}")
-    await q.edit_message_text("\n\n".join(lines))
-
-async def my_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    await q.answer()
-    total_count, total_bytes = get_user_stats(user_id)
-    daily = get_daily_download_count(user_id)
-    mb = total_bytes / (1024*1024)
-    await q.edit_message_text(TEXTS[lang]['my_stats'].format(total_count, mb, daily))
-
-# language
-async def set_lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    lang = get_user_lang(user_id)
-    await q.answer()
-    kb = [[InlineKeyboardButton(label, callback_data=f"lang:{code}")] for code, label in LANG_OPTIONS]
-    await q.edit_message_text(TEXTS[lang]['set_lang_prompt'], reply_markup=InlineKeyboardMarkup(kb))
-
-async def lang_selected_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    user_id = q.from_user.id
-    data = q.data
-    try:
-        _, code = data.split(':', 1)
-    except Exception:
-        await q.answer()
-        return
-    set_user_lang(user_id, code)
-    await q.answer()
-    await q.edit_message_text(TEXTS[code]['lang_changed'])
-
-# admin stats
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if ADMIN_ID and update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("⚠️ فقط ادمین می‌تواند این دستور را اجرا کند.")
-        return
-    import sqlite3
-    conn = sqlite3.connect('downloads.db')
-    c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM users')
-    users_count = c.fetchone()[0]
-    c.execute('SELECT COUNT(*) FROM downloads')
-    downloads_count = c.fetchone()[0]
-    conn.close()
-    await update.message.reply_text(f"📊 کاربران ثبت‌شده: {users_count}\n📥 تعداد دانلودها: {downloads_count}")
-
-# ----------------- main -----------------
-def main():
-    init_db()
-
-    # post_init will be called once the app is started and the loop is running.
-    async def post_init(application: Application) -> None:
-        # schedule background tasks under running loop
-        application.create_task(downloader.worker_loop(application))
-        application.create_task(downloader.cleanup_loop())
-        logger.info("Background tasks scheduled (worker_loop & cleanup_loop).")
-
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
-
-    # basic handlers
-    app.add_handler(CommandHandler("start", start_handler))
-    app.add_handler(CallbackQueryHandler(menu_callback, pattern='^menu$'))
-    app.add_handler(CallbackQueryHandler(create_account_callback, pattern='^create_account$'))
-    app.add_handler(CallbackQueryHandler(login_callback, pattern='^login$'))
-    app.add_handler(CallbackQueryHandler(my_downloads_callback, pattern='^my_downloads$'))
-    app.add_handler(CallbackQueryHandler(my_stats_callback, pattern='^my_stats$'))
-    app.add_handler(CallbackQueryHandler(help_callback, pattern='^help$'))
-    app.add_handler(CallbackQueryHandler(set_lang_callback, pattern='^set_lang$'))
-    app.add_handler(CallbackQueryHandler(lang_selected_callback, pattern='^lang:'))
-
-    # Conversation for signup/login
-    reg_conv = ConversationHandler(
-        entry_points=[],
-        states={
-            REG_FIRSTNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_firstname)],
-            REG_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_username)],
-            REG_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_password)],
-            LOGIN_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_username)],
-            LOGIN_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, login_password)],
-        },
-        fallbacks=[]
+# ---------------------
+# start
+# ---------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    lang = get_user_language(user_id)
+    await update.message.reply_text(
+        get_message("welcome", lang),
+        reply_markup=keyboard_start(lang)
     )
-    app.add_handler(reg_conv)
 
-    # enqueue download (text messages)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, downloader.enqueue_download))
+# ---------------------
+# CALLBACKS
+# ---------------------
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    lang = get_user_language(user_id)
+    data = query.data
 
-    # admin
-    app.add_handler(CommandHandler("stats", stats_command))
+    if data == "help":
+        await query.message.edit_text(get_message("help", lang),
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ بازگشت", callback_data="start")]]))
 
-    logger.info("Bot starting (polling)...")
-    app.run_polling()
+    elif data == "menu":
+        await query.message.edit_text(get_message("main_menu", lang),
+                                      reply_markup=keyboard_main_menu(lang))
+
+    elif data == "back_home" or data == "start":
+        await query.message.edit_text(get_message("welcome", lang),
+                                      reply_markup=keyboard_start(lang))
+
+    elif data == "lang":
+        await query.message.edit_text("🌐 زبان خود را انتخاب کنید:",
+                                      reply_markup=keyboard_languages())
+
+    elif data in ["lang_fa", "lang_en", "lang_ar"]:
+        lang_code = data.split("_")[1]
+        set_language(user_id, lang_code)
+        await query.message.edit_text("✅ زبان تغییر کرد",
+                                      reply_markup=keyboard_start(lang_code))
+
+    elif data == "register":
+        context.user_data["step"] = "fullname"
+        await query.message.edit_text(get_message("create_account_intro", lang))
+
+    elif data == "login":
+        context.user_data["step"] = "login_user"
+        await query.message.edit_text(get_message("login_username", lang))
+
+
+# ---------------------
+# مدیریت پیام‌ها
+# ---------------------
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    lang = get_user_language(user_id)
+    text = update.message.text
+
+    # مراحل ثبت‌نام
+    if context.user_data.get("step") == "fullname":
+        context.user_data["fullname"] = text
+        context.user_data["step"] = "username"
+        return await update.message.reply_text(get_message("enter_username", lang))
+
+    if context.user_data.get("step") == "username":
+        context.user_data["username"] = text
+        context.user_data["step"] = "password"
+        return await update.message.reply_text(get_message("enter_password", lang))
+
+    if context.user_data.get("step") == "password":
+        ok = create_user(user_id, context.user_data["fullname"],
+                         context.user_data["username"], text)
+        if ok:
+            context.user_data.clear()
+            return await update.message.reply_text(get_message("account_created", lang),
+                                                   reply_markup=keyboard_main_menu(lang))
+        else:
+            return await update.message.reply_text("❌ یوزرنیم تکراری است.")
+
+    # مراحل ورود
+    if context.user_data.get("step") == "login_user":
+        context.user_data["login_username"] = text
+        context.user_data["step"] = "login_pass"
+        return await update.message.reply_text(get_message("login_password", lang))
+
+    if context.user_data.get("step") == "login_pass":
+        user = check_login(context.user_data["login_username"], text)
+        if user:
+            context.user_data.clear()
+            return await update.message.reply_text(get_message("login_success", lang))
+        else:
+            return await update.message.reply_text(get_message("login_failed", lang))
+
+    # لینک دانلود
+    platform = detect_platform(text)
+
+    if not platform:
+        return await update.message.reply_text(get_message("invalid_link", lang))
+
+    # محدودیت کاربران
+    downloads_today = count_downloads_today(user_id)
+
+    if user_id > 50_000_000:  # کاربر مهمان
+        if downloads_today >= GUEST_LIMIT:
+            return await update.message.reply_text(get_message("guest_limit", lang))
+        if platform in ["video"]:
+            return await update.message.reply_text(get_message("register_required", lang))
+
+    else:  # کاربر عضو
+        if downloads_today >= USER_LIMIT:
+            return await update.message.reply_text("❌ سقف دانلود روزانه به پایان رسیده.")
+
+    # اضافه به صف
+    add_to_queue(user_id, update.message.chat_id, text)
+    await update.message.reply_text(get_message("download_started", lang),
+                                    reply_markup=InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("🚫 لغو دانلود", callback_data=f"cancel_{user_id}")]
+                                    ]))
+
+
+# ---------------------
+# لغو دانلود
+# ---------------------
+async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = update.callback_query.data
+    if data.startswith("cancel_"):
+        user_id = int(data.split("_")[1])
+        cancel_download(user_id)
+        await update.callback_query.message.edit_text("🚫 دانلود لغو شد.")
+
+
+# ---------------------
+# MAIN
+# ---------------------
+async def main():
+    app = Application.builder().token("YOUR_TELEGRAM_BOT_TOKEN").build()
+
+    asyncio.create_task(download_worker(app.bot))
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(CallbackQueryHandler(cancel_handler, pattern="cancel_"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
