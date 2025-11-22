@@ -3,3 +3,6 @@ yt-dlp>=2025.11.12
 bcrypt
 deep-translator
 aiohttp
+pydub
+requests
+aiohttp
