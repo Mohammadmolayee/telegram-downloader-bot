@@ -1,48 +1,43 @@
 # downloader.py
 import os
 import glob
-import asyncio
 import tempfile
 import shutil
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import yt_dlp
+import shutil as shmod
+
 from config import DOWNLOAD_FOLDER, MAX_VIDEO_DOC_SIZE, YTDL_DEFAULT_VIDEO_FORMAT, YTDL_DEFAULT_AUDIO_FORMAT
 import database as db
 
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# asyncio queue for jobs
 download_queue: asyncio.Queue = asyncio.Queue()
-# canceled job ids
 canceled_jobs: set = set()
 
-# executor for blocking yt-dlp calls
 _executor = ThreadPoolExecutor(max_workers=1)
 
-async def enqueue_download(user_id: int, chat_id: int, url: str):
-    """
-    called by bot when user sends link.
-    returns job_id
-    """
-    job_id = os.urandom(8).hex()
-    await download_queue.put({"id": job_id, "user_id": user_id, "chat_id": chat_id, "url": url})
-    return job_id
+def _has_ffmpeg() -> bool:
+    return shmod.which("ffmpeg") is not None
 
 def _run_yt_dlp(ydl_opts, url, tmpdir):
     """
-    blocking call executed in threadpool
-    returns path to file and info dict
+    Blocking call - executed in threadpool
+    Returns (file_path, info_dict)
     """
+    # ensure outtmpl directory exists in opts
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        # find file
-        files = glob.glob(os.path.join(tmpdir, "*"))
-        # pick newest
-        if not files:
-            # sometimes ydl writes to cwd with id.ext
-            files = glob.glob(os.path.join(".", "*"))
-        files = sorted(files, key=os.path.getmtime, reverse=True)
-        return files[0] if files else None, info
+    # try to find the downloaded file in tmpdir
+    files = glob.glob(os.path.join(tmpdir, "*"))
+    files = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
+    return (files[0] if files else None, info)
+
+async def enqueue_download(user_id: int, chat_id: int, url: str):
+    job_id = os.urandom(8).hex()
+    await download_queue.put({"id": job_id, "user_id": user_id, "chat_id": chat_id, "url": url})
+    return job_id
 
 async def _process_job(bot, item):
     job_id = item["id"]
@@ -50,19 +45,17 @@ async def _process_job(bot, item):
     chat_id = item["chat_id"]
     url = item["url"]
 
-    status_msg = None
+    # notify
     try:
-        status_msg = await bot.send_message(chat_id, "⏳ در حال پردازش دانلود...")
+        status = await bot.send_message(chat_id, "⏳ در حال پردازش دانلود...")
     except Exception:
-        pass
+        status = None
 
-    # check cancel before heavy work
+    # check cancel
     if job_id in canceled_jobs:
-        try:
-            if status_msg:
-                await bot.send_message(chat_id, "🚫 دانلود لغو شد.")
-        except Exception:
-            pass
+        if status:
+            try: await bot.send_message(chat_id, "🚫 دانلود لغو شد."); await status.delete() 
+            except: pass
         return
 
     tmpdir = tempfile.mkdtemp(dir=DOWNLOAD_FOLDER)
@@ -71,112 +64,141 @@ async def _process_job(bot, item):
     try:
         lower = url.lower()
         is_audio = any(x in lower for x in ("soundcloud", "spotify"))
+        has_ffmpeg = _has_ffmpeg()
+
         if is_audio:
-            ydl_opts = {
-                "format": YTDL_DEFAULT_AUDIO_FORMAT,
-                "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-                "noplaylist": True,
-            }
+            # audio options
+            if has_ffmpeg:
+                ydl_opts = {
+                    "format": YTDL_DEFAULT_AUDIO_FORMAT,
+                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+                    "noplaylist": True,
+                    "quiet": True,
+                    "postprocessors": [{
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }]
+                }
+            else:
+                ydl_opts = {
+                    "format": YTDL_DEFAULT_AUDIO_FORMAT,
+                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+                    "noplaylist": True,
+                    "quiet": True,
+                }
         else:
-            ydl_opts = {
-                "format": YTDL_DEFAULT_VIDEO_FORMAT,
-                "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-                "merge_output_format": "mp4",
-                "noplaylist": True,
-            }
+            # video options - add headers for tiktok/user-agent to improve extraction
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            if has_ffmpeg:
+                ydl_opts = {
+                    "format": YTDL_DEFAULT_VIDEO_FORMAT,
+                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+                    "merge_output_format": "mp4",
+                    "noplaylist": True,
+                    "quiet": True,
+                    "headers": headers,
+                }
+            else:
+                # fallback when no ffmpeg: try produce mp4 directly
+                ydl_opts = {
+                    "format": "mp4/best",
+                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+                    "noplaylist": True,
+                    "quiet": True,
+                    "headers": headers,
+                }
 
         loop = asyncio.get_running_loop()
         out_path, info = await loop.run_in_executor(_executor, _run_yt_dlp, ydl_opts, url, tmpdir)
 
         if job_id in canceled_jobs:
-            # user canceled during download
-            try:
-                await bot.send_message(chat_id, "🚫 دانلود لغو شد.")
-            except Exception:
-                pass
+            if status:
+                try: await bot.send_message(chat_id, "🚫 دانلود لغو شد."); await status.delete()
+                except: pass
             return
 
         if not out_path or not os.path.exists(out_path):
             try:
-                await bot.send_message(chat_id, "❌ فایل دانلود نشد یا قابل پیدا کردن نیست.")
-            except Exception:
+                await bot.send_message(chat_id, "❌ فایل دانلود نشد یا پیدا نشد.")
+            except:
                 pass
             return
 
         size = os.path.getsize(out_path)
-        title = info.get("title", "video")
+        title = info.get("title", "file")
+        extractor = info.get("extractor", "unknown")
 
-        # choose send method
-        if is_audio or size > MAX_VIDEO_DOC_SIZE:
-            # send as document (safer for big files)
-            try:
+        # send file: if audio preferred as mp3 and ffmpeg used, file ext likely .mp3
+        ext = os.path.splitext(out_path)[1].lower()
+        try:
+            if ext in (".mp3",) or any(x in out_path.lower() for x in [".mp3"]):
                 with open(out_path, "rb") as f:
-                    await bot.send_document(chat_id, f, caption=f"{title}")
-            except Exception:
-                pass
-        else:
+                    await bot.send_audio(chat_id, f, caption=title)
+            else:
+                # for video or other audio formats, send as document if large or as video if mp4
+                if ext in (".mp4", ".mkv", ".webm"):
+                    with open(out_path, "rb") as f:
+                        # if mp4 send as video, else document
+                        if ext == ".mp4":
+                            await bot.send_video(chat_id, f, caption=title)
+                        else:
+                            await bot.send_document(chat_id, f, caption=title)
+                else:
+                    # fallback: send as document
+                    with open(out_path, "rb") as f:
+                        await bot.send_document(chat_id, f, caption=title)
+        except Exception as e:
             try:
-                with open(out_path, "rb") as f:
-                    await bot.send_video(chat_id, f, caption=f"{title}")
-            except Exception:
+                await bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {e}")
+            except:
                 pass
 
-        # save record in DB
-        db.save_download(user_id, info.get("extractor", "unknown"), url, title, size)
+        # save to db
+        db.save_download(user_id, extractor, url, title, size)
 
     except Exception as e:
         try:
             await bot.send_message(chat_id, f"❌ خطا در دانلود: {e}")
-        except Exception:
+        except:
             pass
     finally:
-        # cleanup
         try:
             shutil.rmtree(tmpdir)
-        except Exception:
+        except:
             pass
-        if status_msg:
+        if status:
             try:
-                await status_msg.delete()
-            except Exception:
+                await status.delete()
+            except:
                 pass
 
 async def worker_loop(app):
-    """
-    main worker loop — scheduled from bot.post_init (safe)
-    """
     bot = app.bot
     while True:
         try:
             item = await download_queue.get()
-            # skip canceled
             if item["id"] in canceled_jobs:
                 download_queue.task_done()
                 continue
             await _process_job(bot, item)
             download_queue.task_done()
         except Exception:
-            # never crash — sleep and continue
             await asyncio.sleep(1)
 
 async def cleanup_loop():
-    """
-    periodically cleanup lingering files (safety)
-    """
-    import time
     while True:
         try:
-            now = time.time()
-            for p in os.listdir(DOWNLOAD_FOLDER):
-                full = os.path.join(DOWNLOAD_FOLDER, p)
+            now = asyncio.get_event_loop().time()
+            for name in os.listdir(DOWNLOAD_FOLDER):
+                full = os.path.join(DOWNLOAD_FOLDER, name)
                 try:
                     if os.path.isdir(full):
-                        # check age of directory
-                        m = os.path.getmtime(full)
-                        if now - m > 3600:  # 1 hour
+                        # remove directories older than 1 hour
+                        if (asyncio.get_event_loop().time() - os.path.getmtime(full)) > 3600:
                             shutil.rmtree(full, ignore_errors=True)
-                except Exception:
+                except:
                     pass
-        except Exception:
+        except:
             pass
         await asyncio.sleep(600)
