@@ -1,7 +1,7 @@
 # messages.py
+# متن‌های فارسی برای ربات؛ get_text(key, lang) می‌تواند ترجمه کند
 from translator import translate
 
-# کلیدها و متن‌های پایه به فارسی
 BASE = {
     "welcome_title": "👋 سلام! به {bot_name} خوش اومدی!",
     "welcome_sub": "📚 برای راهنما روی «راهنما» بزن.\n📂 برای امکانات، «منوی اصلی» را انتخاب کن.\n🌐 برای تغییر زبان، «زبان» را انتخاب کن.",
@@ -10,14 +10,12 @@ BASE = {
     "btn_set_lang": "🌐 تغییر زبان",
     "main_menu_text": "📂 **منوی اصلی**\nلطفاً یک گزینه انتخاب کن:",
     "btn_create_account": "⭐ ساخت حساب",
-    "btn_login": "🔐 ورود",
     "btn_back": "⬅️ بازگشت",
     "help_full": (
         "📚 راهنمای ربات دانلودر حرفه‌ای\n\n"
         "👤 ساخت حساب:\n"
         "نام و نام خانوادگی → یوزرنیم → پسورد (۸-۱۲ کرکتر).\n\n"
-        "🔐 ورود:\n"
-        "بعد از ساخت حساب، از دکمه ورود استفاده کنید.\n\n"
+        "🔐 ورود: این ربات از autologin استفاده می‌کند — اگر قبلاً حساب ساختی کافیست /start بزنی و مستقیماً وارد پنل می‌شوی.\n\n"
         "🧑‍💻 مهمان:\n"
         "• روزی ۱۵ دانلود\n"
         "• دانلود ویدیو از اینستاگرام\n"
@@ -26,23 +24,19 @@ BASE = {
         "• روزی ۲۵ دانلود\n"
         "• دانلود ویدیو 720p از YouTube, TikTok, Instagram\n"
         "• دانلود صوت از SoundCloud و Spotify\n\n"
-        "برای بازگشت از دکمه «بازگشت» استفاده کنید."
+        "برای بازگشت دکمه‌ی «بازگشت» را بزنید."
     ),
-    "create_prompt_name": "📝 لطفاً *نام و نام خانوادگی* خود را ارسال کنید:",
-    "create_prompt_username": "🧑‍💻 یوزرنیم (بدون @) را ارسال کنید:",
-    "create_prompt_password": "🔒 پسورد (۸ تا ۱۲ کاراکتر، حروف/اعداد) را ارسال کنید:",
-    "create_success": "🎉 حساب با موفقیت ساخته شد!\nبرای ورود از دکمه «ورود» استفاده کن.",
-    "create_fail": "❌ ثبت نام ناموفق — ممکن است یوزرنیم تکراری باشد.",
-    "login_prompt_username": "🔐 لطفاً یوزرنیم خود را وارد کنید:",
-    "login_prompt_password": "🔐 لطفاً رمز عبور را وارد کنید:",
-    "login_success": "🎊 ورود موفق! به پنل خوش آمدی.",
-    "login_fail": "❌ نام کاربری یا رمز اشتباه است.",
+    "create_prompt_name": "📝 لطفاً نام و نام خانوادگی خود را ارسال کنید:",
+    "create_prompt_username": "🧑‍💻 لطفاً یوزرنیم (بدون @) را وارد کنید:",
+    "create_prompt_password": "🔒 لطفاً پسورد (۸ تا ۱۲ کاراکتر) را وارد کنید:",
+    "create_success": "🎉 حساب با موفقیت ساخته شد!\nاکنون /start را بزن تا وارد پنل شوی.",
+    "create_fail": "❌ ثبت نام ناموفق — یوزرنیم ممکن است تکراری باشد.",
+    "login_success": "🎊 ورود موفق — به پنل خوش آمدی.",
+    "login_fail": "❌ ورود ناموفق.",
     "panel_welcome": "⭐ پنل کاربری\n👤 {display_name}\n📊 دانلود امروز: {count}/{limit}\n\nگزینه‌ای انتخاب کن:",
     "btn_profile": "👤 پروفایل من",
     "btn_recent": "📥 دانلودهای اخیر",
     "btn_stats": "📊 آمار دانلود",
-    "btn_audio": "🎵 دانلود صوت",
-    "btn_video": "🎬 دانلود ویدیو",
     "btn_queue_status": "🗂 وضعیت صف",
     "btn_cancel_download": "🚫 لغو دانلود",
     "added_queue": "✅ لینک شما به صف اضافه شد. (برای لغو، دکمه لغو را بزن)",
@@ -58,4 +52,8 @@ def get_text(key: str, lang: str = "fa", **kwargs) -> str:
     text = BASE.get(key, "")
     if kwargs:
         text = text.format(**kwargs)
-    return translate(text, lang)
+    # translate if needed (translator may return same text if not available)
+    try:
+        return translate(text, lang)
+    except Exception:
+        return text
