@@ -1,39 +1,53 @@
 # keyboards.py
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 
-def start_reply_keyboard():
-    keys = [
-        ["📖 راهنما", "🧰 منوی اصلی"],
-        ["📜 قوانین", "ℐ درباره ما"],
-        ["🌐 زبان"]
-    ]
-    return ReplyKeyboardMarkup(keys, resize_keyboard=True)
 
-def guest_main_reply():
-    keys = [
-        ["🔐 ساخت حساب", "🤖 ورود خودکار"],
-        ["📘 راهنمای منوی اصلی", "🔙 بازگشت"]
-    ]
-    return ReplyKeyboardMarkup(keys, resize_keyboard=True)
+def start_keyboard(lang):
+    return ReplyKeyboardMarkup([
+        ["📖 راهنما" if lang == "fa" else "📖 Help",
+         "📜 قوانین" if lang == "fa" else "📜 Rules"],
+        ["ℹ درباره ما" if lang == "fa" else "ℹ About"],
+        ["🧰 منوی اصلی" if lang == "fa" else "🧰 Main Menu"],
+        ["🌐 زبان" if lang == "fa" else "🌐 Language"],
+    ], resize_keyboard=True)
 
-def user_panel_reply():
-    keys = [
-        ["📥 دانلودهای اخیر", "📊 وضعیت حساب"],
-        ["📘 راهنمای پنل کاربری", "📜 قوانین"],
-        ["ℹ️ درباره ما", "⚙️ تنظیمات"],
-        ["🔙 بازگشت"]
-    ]
-    return ReplyKeyboardMarkup(keys, resize_keyboard=True)
 
-def inline_back():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back")]])
+def main_menu_keyboard(lang):
+    return ReplyKeyboardMarkup([
+        ["👤 ساخت حساب" if lang == "fa" else "👤 Create Account"],
+        ["🔐 ورود" if lang == "fa" else "🔐 Login"],
+        ["🔙 بازگشت" if lang == "fa" else "🔙 Back"]
+    ], resize_keyboard=True)
+
+
+def panel_keyboard(lang):
+    return ReplyKeyboardMarkup([
+        ["📥 دانلود جدید" if lang == "fa" else "📥 New Download"],
+        ["📂 دانلودهای اخیر" if lang == "fa" else "📂 Recent"],
+        ["🎨 تنظیمات" if lang == "fa" else "🎨 Settings"],
+        ["ℹ درباره ما" if lang == "fa" else "ℹ About"],
+        ["🔙 بازگشت" if lang == "fa" else "🔙 Back"]
+    ], resize_keyboard=True)
+
+
+def settings_keyboard(lang):
+    return ReplyKeyboardMarkup([
+        ["🌐 تغییر زبان" if lang == "fa" else "🌐 Change Language"],
+        ["🎨 تغییر تم" if lang == "fa" else "🎨 Theme"],
+        ["🔙 بازگشت" if lang == "fa" else "🔙 Back"],
+    ], resize_keyboard=True)
+
 
 def language_inline():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa"),
-         InlineKeyboardButton("🇺🇸 English", callback_data="lang_en"),
-         InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")]
+        [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")],
+        [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")],
     ])
 
-def cancel_inline():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("⛔️ لغو", callback_data="cancel")]])
+
+def theme_inline():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌙 دارک", callback_data="theme_dark")],
+        [InlineKeyboardButton("☀️ لایت", callback_data="theme_light")],
+    ])
