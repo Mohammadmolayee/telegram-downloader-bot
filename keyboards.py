@@ -1,8 +1,7 @@
 # keyboards.py
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 
-def start_reply_keyboard(lang='fa'):
-    # Reply keyboard for /start (guest)
+def start_reply_keyboard():
     keys = [
         ["📖 راهنما", "🧰 منوی اصلی"],
         ["📜 قوانین", "ℐ درباره ما"],
@@ -13,8 +12,7 @@ def start_reply_keyboard(lang='fa'):
 def guest_main_reply():
     keys = [
         ["🔐 ساخت حساب", "🤖 ورود خودکار"],
-        ["📘 راهنمای منوی اصلی", "⚙️ تنظیمات"],
-        ["ℹ️ درباره ما", "🔙 بازگشت"]
+        ["📘 راهنمای منوی اصلی", "🔙 بازگشت"]
     ]
     return ReplyKeyboardMarkup(keys, resize_keyboard=True)
 
