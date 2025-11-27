@@ -1,301 +1,278 @@
 # bot.py
-# فایل اصلی: بارگذاری تنظیمات، راه‌اندازی Application، handlers، منطق دانلود.
 import logging
+from pathlib import Path
 import asyncio
-import os
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from settings import TOKEN, DOWNLOAD_DIR, LOGGING_LEVEL
+
+import settings
+import database as DB
+import downloader
 import messages as MSG
 import keyboards as KB
-import downloader
-import database as DB
-from pathlib import Path
+import utils
 
-# Logging
-logging.basicConfig(level=LOGGING_LEVEL)
+logging.basicConfig(level=getattr(logging, settings.LOGGING_LEVEL.upper(), logging.INFO))
 logger = logging.getLogger(__name__)
 
-# Helpers
-def detect_platform(url: str) -> str:
-    url_lower = url.lower()
-    if "youtube" in url_lower or "youtu.be" in url_lower:
-        return "YouTube"
-    if "tiktok" in url_lower:
-        return "TikTok"
-    if "instagram" in url_lower:
-        return "Instagram"
-    if "soundcloud" in url_lower:
-        return "SoundCloud"
-    if "spotify" in url_lower:
-        return "Spotify"
-    return "Unknown"
+# ---------- helpers ----------
+def t(user_id: int, key: str) -> str:
+    # get user lang (fallback fa)
+    lang = DB.get_user_lang(user_id)
+    return MSG.get(lang, key)
 
-# Handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    text = MSG.MESS['start']
-    # if user has account -> show panel (auto-login)
-    if DB.user_exists(user.id):
-        await send_panel(update, context)
-        return
-    await update.message.reply_text(text, reply_markup=KB.start_reply_keyboard())
-
-async def send_panel(update_or_query, context: ContextTypes.DEFAULT_TYPE):
-    # helper to send member panel; handles both Message and CallbackQuery contexts
-    if isinstance(update_or_query, Update) and update_or_query.message:
-        user = update_or_query.effective_user
-        chat = update_or_query.message
-        send_fn = chat.reply_text
+# send panel for member
+async def send_panel_by_user(update_obj, context: ContextTypes.DEFAULT_TYPE):
+    # called from message or callback
+    if hasattr(update_obj, "message") and update_obj.message:
+        user = update_obj.effective_user
+        chat = update_obj.message
+        send = chat.reply_text
     else:
-        # from callback query
-        cq = update_or_query.callback_query
+        cq = update_obj.callback_query
         user = cq.from_user
-        send_fn = cq.message.reply_text
+        send = cq.message.reply_text
 
     name = user.first_name or user.username or str(user.id)
-    text = MSG.MESS['panel_welcome'].format(name=name, limit=DB.USER_DAILY_LIMIT)
-    await send_fn(text, reply_markup=KB.user_panel_reply())
+    limit = DB.get_limits(user.id)
+    text = MSG.get(DB.get_user_lang(user.id), 'panel_welcome').format(name=name, limit=limit)
+    # mark menu
+    context.user_data['menu'] = 'user_panel'
+    await send(text, reply_markup=KB.user_panel_reply())
 
-async def help_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # help in start
-    await update.message.reply_text(MSG.MESS['help_start'], reply_markup=KB.inline_back())
-
-async def main_menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(MSG.MESS['main_menu'], reply_markup=KB.inline_back())
-
-async def panel_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(MSG.MESS['help_panel'], reply_markup=KB.inline_back())
-
-async def about_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # about from either message or callback
-    if update.message:
-        await update.message.reply_text(MSG.MESS['about'], reply_markup=KB.inline_back())
-    else:
-        await update.callback_query.message.reply_text(MSG.MESS['about'], reply_markup=KB.inline_back())
-
-async def rules_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:
-        await update.message.reply_text(MSG.MESS['rules'], reply_markup=KB.inline_back())
-    else:
-        await update.callback_query.message.reply_text(MSG.MESS['rules'], reply_markup=KB.inline_back())
-
-# Account creation simple (no password, just minimal)
-async def create_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Step 1: ask for name
-    context.user_data['create_step'] = 'name'
-    await update.message.reply_text("لطفا نام کامل خود را ارسال کنید:", reply_markup=KB.cancel_inline())
-
-async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    text = update.message.text.strip()
+    lang = DB.get_user_lang(user.id)
+    text = MSG.get(lang, 'start')
+    context.user_data['menu'] = 'start'
+    await update.message.reply_text(text, reply_markup=KB.start_reply_keyboard())
 
-    # ---------------------------
-    # 🔹 دکمه‌های صفحه استارت
-    # ---------------------------
-    if text == "📖 راهنما":
-        return await update.message.reply_text(MSG.MESS['help_start'], reply_markup=KB.inline_back())
+async def send_guest_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['menu'] = 'main_menu'
+    await update.message.reply_text(MSG.get(DB.get_user_lang(update.effective_user.id), 'main_menu'),
+                                    reply_markup=KB.guest_main_reply())
 
-    if text == "📜 قوانین":
-        return await update.message.reply_text(MSG.MESS['rules'], reply_markup=KB.inline_back())
-
-    if text == "ℐ درباره ما":
-        return await update.message.reply_text(MSG.MESS['about'], reply_markup=KB.inline_back())
-
-    if text == "🌐 زبان":
-        return await update.message.reply_text("زبان را انتخاب کنید:", reply_markup=KB.language_inline())
-
-    # ---------------------------
-    # 🔹 منوی اصلی
-    # ---------------------------
-    if text == "🧰 منوی اصلی":
-        return await update.message.reply_text(
-            MSG.MESS['main_menu'], reply_markup=KB.guest_main_reply()
-        )
-
-    if text == "📘 راهنمای منوی اصلی":
-        return await update.message.reply_text(MSG.MESS['main_menu'], reply_markup=KB.inline_back())
-
-    if text == "🔐 ساخت حساب":
-        return await create_account_start(update, context)
-
-    if text == "🤖 ورود خودکار":
-        if DB.user_exists(user.id):
-            return await send_panel(update, context)
-        else:
-            return await update.message.reply_text("❗ اول باید حساب بسازی.")
-
-    # ---------------------------
-    # 🔹 پنل کاربری (کاربر عضو)
-    # ---------------------------
-    if text == "📘 راهنمای پنل کاربری":
-        return await update.message.reply_text(MSG.MESS['help_panel'], reply_markup=KB.inline_back())
-
-    if text == "📥 دانلودهای اخیر":
-        rows = DB.get_downloads_recent(user.id)
-        if not rows:
-            return await update.message.reply_text("🔍 هیچ دانلودی ثبت نشده.")
-        msg = "📥 دانلودهای اخیر:\n\n"
-        for p,t,ft,dt in rows:
-            msg += f"• {p} | {ft}\n{t}\n⏱ {dt}\n\n"
-        return await update.message.reply_text(msg, reply_markup=KB.inline_back())
-
-    if text == "📊 وضعیت حساب":
-        cnt = DB.downloads_count_today(user.id)
-        msg = f"📊 وضعیت حساب:\n\nدانلودهای امروز: {cnt}/{DB.USER_DAILY_LIMIT}\nپلتفرم‌های فعال: همه"
-        return await update.message.reply_text(msg, reply_markup=KB.inline_back())
-
-    if text == "⚙️ تنظیمات":
-        return await update.message.reply_text("تنظیمات:", reply_markup=KB.language_inline())
-
-    if text == "🔙 بازگشت":
-        return await update.message.reply_text(MSG.MESS['start'], reply_markup=KB.start_reply_keyboard())
-
-    # ---------------------------
-    # 🔹 غیر از این‌ها: لینک؟ یا پیام اشتباه
-    # ---------------------------
-    if not (text.startswith("http://") or text.startswith("https://")):
-        return await update.message.reply_text("برای دانلود، یک لینک معتبر ارسال کنید.")
-
-    # ---------------------------
-    # 🔹 اگر لینک بود → برو برای دانلود
-    # ---------------------------
-    return await process_download(update, context, text)
-
-    
-    # Cancel handling
-    if context.user_data.get('create_step') == 'name' and text == '⛔️ لغو':
-        context.user_data.clear()
-        await update.message.reply_text("ساخت حساب لغو شد.", reply_markup=KB.start_reply_keyboard())
-        return
-
-    # Account creation flow
-    step = context.user_data.get('create_step')
-    if step == 'name':
-        context.user_data['name'] = text
-        context.user_data['create_step'] = 'username'
-        await update.message.reply_text("لطفا یوزرنیم (بدون @) وارد کنید:", reply_markup=KB.cancel_inline())
-        return
-    elif step == 'username':
-        username = text.lstrip('@')
-        context.user_data['username'] = username
-        # create user in DB
-        created = DB.create_user(user.id, username, context.user_data.get('name'))
-        context.user_data.clear()
-        if created:
-            await update.message.reply_text("حساب با موفقیت ساخته شد! برای ورود خودکار /start یا دکمه ورود خودکار را بزنید.", reply_markup=KB.start_reply_keyboard())
-        else:
-            await update.message.reply_text("خطا: ممکن است قبلاً حساب ساخته شده باشد.", reply_markup=KB.start_reply_keyboard())
-        return
-
-    # Otherwise treat as link to download
-    # If text doesn't look like URL, ignore
-    if not (text.startswith("http://") or text.startswith("https://")):
-        await update.message.reply_text("برای دانلود، یک لینک معتبر ارسال کنید.", reply_markup=KB.start_reply_keyboard())
-        return
-
-    # Platform check & permission
-    platform = detect_platform(text)
-
-    # Guests restrictions
-    if not DB.user_exists(user.id):
-        # guest
-        if platform not in ("Instagram", "Spotify"):
-            await update.message.reply_text("❗ این پلتفرم برای مهمان غیرفعال است. برای دسترسی به YouTube/TikTok/SoundCloud لطفاً حساب بسازید.", reply_markup=KB.start_reply_keyboard())
-            return
-        # check limit
-        if DB.downloads_count_today(user.id) >= DB.GUEST_DAILY_LIMIT:
-            await update.message.reply_text(MSG.MESS['limit_exceeded'])
-            return
+# ---------- handlers ----------
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Auto-login: if user exists -> panel, else start
+    user = update.effective_user
+    if DB.user_exists(user.id):
+        await send_panel_by_user(update, context)
     else:
-        # member limit
-        if DB.downloads_count_today(user.id) >= DB.USER_DAILY_LIMIT:
-            await update.message.reply_text(MSG.MESS['limit_exceeded'])
-            return
+        await send_start_menu(update, context)
 
-    # Start processing
-    status_msg = await update.message.reply_text(MSG.MESS['processing'])
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(MSG.get(DB.get_user_lang(update.effective_user.id), 'help_start'),
+                                    reply_markup=KB.inline_back())
+
+# account creation flow (3 steps: name -> username)
+async def create_account_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['create_flow'] = 'name'
+    await update.message.reply_text("👤 لطفاً نام کامل خود را ارسال کنید:", reply_markup=KB.cancel_inline())
+
+# process actual downloads + send file
+async def process_download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
+    user = update.effective_user
+    platform = utils.detect_platform(url)
+    # decide audio only
+    audio_only = platform in ("Spotify", "SoundCloud")
+    status_msg = await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'processing'))
     try:
-        # decide audio or video automatically (for simplicity: if spotify or soundcloud -> audio)
-        audio_only = platform in ("Spotify", "SoundCloud")
-        # call async downloader
-        filepath, title, file_type = await downloader.download_url(text, audio_only=audio_only)
-        # send file
-        path_obj = Path(filepath)
-        size = path_obj.stat().st_size
-        # Use appropriate send method
+        filepath, title, file_type = await downloader.download_url(url, audio_only=audio_only)
+        p = Path(filepath)
         with open(filepath, 'rb') as f:
             if file_type == 'audio':
-                # try to send as audio (telegram will detect mime)
                 await update.message.reply_audio(f, caption=f"{platform}: {title}")
             else:
-                # send as document to avoid automatic compression if large
+                # send as document to avoid compression for large files
                 await update.message.reply_document(f, caption=f"{platform}: {title}")
-        # Save to DB
-        DB.save_download(user.id, platform, text, title, file_type)
+        DB.save_download(user.id, platform, url, title, file_type)
         await status_msg.delete()
     except Exception as e:
         logger.exception("download error")
         try:
-            await status_msg.edit_text(MSG.MESS['download_error'].format(err=str(e)))
+            await status_msg.edit_text(MSG.get(DB.get_user_lang(user.id), 'download_error').format(err=str(e)))
         except Exception:
             pass
     finally:
-        # cleanup file if exists
         try:
             if 'filepath' in locals() and Path(filepath).exists():
                 downloader.safe_remove(filepath)
         except Exception:
             pass
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(MSG.MESS['main_menu'], reply_markup=KB.guest_main_reply())
+# message router
+async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    text = update.message.text.strip()
 
-# CallbackQuery handler for inline buttons
+    # ---------- check for cancel in create flow ----------
+    if text == '⛔️ لغو' and context.user_data.get('create_flow'):
+        context.user_data.pop('create_flow', None)
+        await update.message.reply_text("عملیات ساخت حساب لغو شد.", reply_markup=KB.start_reply_keyboard())
+        return
+
+    # ---------- account creation flow ----------
+    if context.user_data.get('create_flow') == 'name':
+        # receive name then ask username
+        context.user_data['tmp_name'] = text
+        context.user_data['create_flow'] = 'username'
+        await update.message.reply_text("🆔 لطفا یک یوزرنیم (بدون @) وارد کنید:", reply_markup=KB.cancel_inline())
+        return
+    if context.user_data.get('create_flow') == 'username':
+        username = text.lstrip('@')[:64]
+        name = context.user_data.get('tmp_name') or update.effective_user.first_name
+        created = DB.create_user(update.effective_user.id, username, name)
+        context.user_data.pop('create_flow', None)
+        context.user_data.pop('tmp_name', None)
+        if created:
+            await update.message.reply_text("🎉 حساب با موفقیت ساخته شد! برای ورود به پنل، /start یا دکمه 'ورود خودکار' را بزنید.",
+                                            reply_markup=KB.start_reply_keyboard())
+        else:
+            await update.message.reply_text("⚠️ خطا یا یوزرنیم تکراری است. دوباره تلاش کنید.", reply_markup=KB.start_reply_keyboard())
+        return
+
+    # ---------- handle reply-keyboard button texts ----------
+    # start menu buttons
+    if text == "📖 راهنما":
+        await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'help_start'), reply_markup=KB.inline_back())
+        return
+    if text == "📜 قوانین":
+        await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'rules'), reply_markup=KB.inline_back())
+        return
+    if text == "ℐ درباره ما":
+        await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'about'), reply_markup=KB.inline_back())
+        return
+    if text == "🌐 زبان":
+        await update.message.reply_text("لطفا زبان را انتخاب کنید:", reply_markup=KB.language_inline())
+        return
+
+    # guest main buttons
+    if text == "🧰 منوی اصلی":
+        await send_guest_main(update, context)
+        return
+    if text == "📘 راهنمای منوی اصلی":
+        await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'help_main_instructions'), reply_markup=KB.inline_back())
+        return
+    if text == "🔐 ساخت حساب":
+        await create_account_start(update, context)
+        return
+    if text == "🤖 ورود خودکار":
+        if DB.user_exists(user.id):
+            await send_panel_by_user(update, context)
+        else:
+            await update.message.reply_text("❗ شما هنوز حساب ندارید. ابتدا ساخت حساب را بزنید.", reply_markup=KB.guest_main_reply())
+        return
+    if text == "🔙 بازگشت":
+        # if user existed go to panel, else start
+        if DB.user_exists(user.id):
+            await send_panel_by_user(update, context)
+        else:
+            await send_start_menu(update, context)
+        return
+
+    # panel member buttons
+    if text == "📘 راهنمای پنل کاربری":
+        await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'help_panel'), reply_markup=KB.inline_back())
+        return
+    if text == "📥 دانلودهای اخیر":
+        rows = DB.get_downloads_recent(user.id)
+        if not rows:
+            await update.message.reply_text("🔍 هیچ دانلودی ثبت نشده.", reply_markup=KB.inline_back())
+            return
+        msg = "📥 دانلودهای اخیر:\n\n"
+        for p,t,ft,dt in rows:
+            msg += f"• {p} | {ft}\n{t}\n⏱ {dt}\n\n"
+        await update.message.reply_text(msg, reply_markup=KB.inline_back())
+        return
+    if text == "📊 وضعیت حساب":
+        cnt = DB.downloads_count_today(user.id)
+        limit = DB.get_limits(user.id)
+        await update.message.reply_text(f"📊 وضعیت حساب:\n\nدانلودهای امروز: {cnt}/{limit}\nپلتفرم‌های فعال: {'تمامی پلتفرم‌ها' if DB.user_exists(user.id) else 'Instagram, Spotify'}",
+                                        reply_markup=KB.inline_back())
+        return
+    if text == "⚙️ تنظیمات":
+        # settings only in panel
+        await update.message.reply_text("تنظیمات:", reply_markup=KB.language_inline())
+        return
+    if text == "ℹ️ درباره ما":
+        await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'about'), reply_markup=KB.inline_back())
+        return
+
+    # ---------- if not a known button -> treat as link or plain text ----------
+    if not utils.looks_like_url(text):
+        await update.message.reply_text("برای دانلود، یک لینک معتبر ارسال کنید.", reply_markup=KB.start_reply_keyboard())
+        return
+
+    # ---------- LINK processing rules ----------
+    # disallow downloads when in main_menu view (as requested)
+    if context.user_data.get('menu') == 'main_menu':
+        await update.message.reply_text("برای دانلود در این بخش امکان‌پذیر نیست. لطفاً به صفحه اصلی (استارت) یا پنل مراجعه کنید.", reply_markup=KB.start_reply_keyboard())
+        return
+
+    # check permission by platform (guest vs member)
+    platform = utils.detect_platform(text)
+    if not DB.user_exists(user.id):
+        # guest case: only Instagram & Spotify allowed
+        if platform not in ("Instagram", "Spotify"):
+            await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'guest_restriction'), reply_markup=KB.start_reply_keyboard())
+            return
+        if DB.downloads_count_today(user.id) >= DB.GUEST_DAILY_LIMIT:
+            await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'limit_exceeded'), reply_markup=KB.start_reply_keyboard())
+            return
+        # mark menu if came from start
+        context.user_data['menu'] = 'guest_panel'
+        # proceed to download
+        await process_download_and_send(update, context, text)
+        return
+    else:
+        # member
+        if DB.downloads_count_today(user.id) >= DB.USER_DAILY_LIMIT:
+            await update.message.reply_text(MSG.get(DB.get_user_lang(user.id), 'limit_exceeded'), reply_markup=KB.user_panel_reply())
+            return
+        context.user_data['menu'] = 'user_panel'
+        await process_download_and_send(update, context, text)
+        return
+
+# callbacks for inline
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     data = q.data
 
     if data == "back":
-        # send start or panel based on user
         if DB.user_exists(q.from_user.id):
-            await send_panel(update, context)
+            await send_panel_by_user(update, context)
         else:
-            await q.message.reply_text(MSG.MESS['start'], reply_markup=KB.start_reply_keyboard())
-    elif data.startswith("lang_"):
-        # we will not implement full i18n here — placeholder
-        await q.message.reply_text("زبان تغییر کرد.", reply_markup=KB.inline_back())
-    elif data == "cancel":
-        await q.message.reply_text("عملیات لغو شد.", reply_markup=KB.start_reply_keyboard())
-    else:
-        await q.message.reply_text("عملیات نامشخص.", reply_markup=KB.inline_back())
+            await send_start_menu(update, context)
+        return
+    if data.startswith("lang_"):
+        lang = data.split("_",1)[1]
+        # store user lang if user exists, else store in user_data
+        if DB.user_exists(q.from_user.id):
+            DB.set_user_lang(q.from_user.id, lang)
+        else:
+            context.user_data['lang'] = lang
+        await q.message.reply_text("✅ زبان تغییر کرد.", reply_markup=KB.inline_back())
+        return
+    if data == "cancel":
+        context.user_data.pop('create_flow', None)
+        context.user_data.pop('tmp_name', None)
+        await q.message.reply_text("✅ عملیات لغو شد.", reply_markup=KB.start_reply_keyboard())
+        return
 
-# Basic commands
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
-
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await help_start(update, context)
-
-# Main runner
+# start app
 def main():
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(settings.TOKEN).build()
 
-    # Commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
-
-    # Callback queries (inline)
-    app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # Message handlers
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
-
-    # Other handlers (account creation)
     app.add_handler(CommandHandler("create_account", create_account_start))
 
-    # Start polling (this manages the event loop internally)
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
+
     logger.info("Starting bot...")
     app.run_polling()
 
