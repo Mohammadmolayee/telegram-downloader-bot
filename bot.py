@@ -1,5 +1,6 @@
-# bot.py
-import asyncio
+# bot.py (fixed - event loop / run_polling issues resolved)
+import os
+import logging
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -10,6 +11,7 @@ from telegram.ext import (
     ContextTypes
 )
 
+# imports from your modules (assumed present)
 from database import (
     init_db, user_exists, create_user, login,
     get_user, set_language, set_theme
@@ -21,6 +23,8 @@ from keyboards import (
 from downloader import download_media, cancel_download
 from messages import t
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # حافظه وضعیت
 user_state = {}      # مرحله ساخت حساب / ورود
@@ -35,15 +39,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user_exists(user_id):
         user = get_user(user_id)
-        lang = user["language"]
+        lang = user.get("language", "fa")
         await update.message.reply_text(
-            t(user, "start_member"),
+            t(user, "start_member") if hasattr(t, "__call__") else t({"language": lang}, "start"),
             reply_markup=panel_keyboard(lang)
         )
     else:
+        # guest: use fa default or context lang if set
+        lang = context.user_data.get("language", "fa")
         await update.message.reply_text(
-            t({"language": "fa"}, "start_guest"),
-            reply_markup=start_keyboard("fa")
+            t({"language": lang}, "start_guest") if hasattr(t, "__call__") else t({"language": "fa"}, "start"),
+            reply_markup=start_keyboard(lang)
         )
 
 
@@ -51,23 +57,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # پیام‌ها
 # ---------------------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message.text
+    if not update.message or not update.message.text:
+        return
+
+    msg = update.message.text.strip()
     user_id = update.effective_user.id
 
     user = get_user(user_id)
-    lang = user["language"] if user else "fa"
+    lang = user.get("language", "fa") if user else context.user_data.get("language", "fa")
 
     # بک ریپلی
     if msg in ["🔙 بازگشت", "🔙 Back"]:
         if user:
             await update.message.reply_text(
-                t(user, "start_member"),
+                t({"language": lang}, "start_member"),
                 reply_markup=panel_keyboard(lang)
             )
         else:
             await update.message.reply_text(
-                t({"language": "fa"}, "start_guest"),
-                reply_markup=start_keyboard("fa")
+                t({"language": lang}, "start_guest"),
+                reply_markup=start_keyboard(lang)
             )
         return
 
@@ -98,7 +107,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # --------------------
-    # ساخت حساب
+    # ساخت حساب (3-step: name, username, password)
     # --------------------
     if msg in ["👤 ساخت حساب", "👤 Create Account"]:
         user_state[user_id] = "register_name"
@@ -112,17 +121,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_state.get(user_id) == "register_username":
-        pending_data[user_id]["username"] = msg
+        pending_data[user_id]["username"] = msg.strip().lstrip("@")
         user_state[user_id] = "register_password"
         await update.message.reply_text(t({"language": lang}, "reg_password"))
         return
 
     if user_state.get(user_id) == "register_password":
-        info = pending_data[user_id]
-        ok = create_user(user_id, info["name"], info["username"], msg)
+        info = pending_data.get(user_id, {})
+        name = info.get("name", update.effective_user.first_name)
+        username = info.get("username", f"user{user_id}")
+        password = msg
+        ok = create_user(user_id, name, username, password)
         if ok:
-            user_state.pop(user_id)
-            pending_data.pop(user_id)
+            user_state.pop(user_id, None)
+            pending_data.pop(user_id, None)
             await update.message.reply_text(
                 t({"language": lang}, "reg_done"),
                 reply_markup=panel_keyboard(lang)
@@ -132,7 +144,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # --------------------
-    # ورود
+    # ورود (login)
     # --------------------
     if msg in ["🔐 ورود", "🔐 Login"]:
         user_state[user_id] = "login_username"
@@ -140,17 +152,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_state.get(user_id) == "login_username":
-        pending_data[user_id] = {"username": msg}
+        pending_data[user_id] = {"username": msg.strip().lstrip("@")}
         user_state[user_id] = "login_password"
         await update.message.reply_text(t({"language": lang}, "login_password"))
         return
 
     if user_state.get(user_id) == "login_password":
-        username = pending_data[user_id]["username"]
+        username = pending_data.get(user_id, {}).get("username")
         uid = login(username, msg)
         if uid:
-            user_state.pop(user_id)
-            pending_data.pop(user_id)
+            user_state.pop(user_id, None)
+            pending_data.pop(user_id, None)
             await update.message.reply_text(
                 t({"language": lang}, "login_success"),
                 reply_markup=panel_keyboard(lang)
@@ -184,74 +196,87 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # --------------------
-    # دانلود
+    # دانلود (فقط لینک‌ها)
     # --------------------
     if msg.startswith("http"):
-        if not user:
-            await update.message.reply_text(
-                t({"language": "fa"}, "guest_download")
-            )
-        await do_download(update, context)
+        # schedule download as application task (safe)
+        # check permission: if in main menu, disallow (your requirement)
+        current_menu = context.user_data.get("menu")
+        if current_menu == "main_menu":
+            await update.message.reply_text(t({"language": lang}, "guest_download_block"))
+            return
+
+        # if guest and platform restriction etc. (you can add checks here)
+        # schedule task via context.application.create_task
+        try:
+            context.application.create_task(download_media(user_id, msg, context.bot, lang))
+        except Exception as e:
+            logger.exception("Failed to create download task")
+            await update.message.reply_text(t({"language": lang}, "download_error"))
         return
 
+    # unknown text
     await update.message.reply_text(t({"language": lang}, "unknown"))
-    
-
-# ---------------------------
-# دانلود
-# ---------------------------
-async def do_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    user_id = update.effective_user.id
-    user = get_user(user_id)
-    lang = user["language"] if user else "fa"
-
-    task = asyncio.create_task(
-        download_media(user_id, url, context.bot, lang)
-    )
 
 
 # ---------------------------
-# کال‌بک‌ها
+# کال‌بک‌ها (inline)
 # ---------------------------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = update.callback_query.data
-    user_id = update.effective_user.id
+    q = update.callback_query
+    if not q:
+        return
+    await q.answer()
+    data = q.data
+    user_id = q.from_user.id
     user = get_user(user_id)
-    lang = user["language"] if user else "fa"
+    lang = user.get("language", "fa") if user else context.user_data.get("language", "fa")
 
     # انتخاب زبان
     if data.startswith("lang_"):
-        new_lang = data.split("_")[1]
-        set_language(user_id, new_lang)
-        await update.callback_query.answer("Language changed.")
-        await update.callback_query.edit_message_text(
-            t({"language": new_lang}, "lang_changed")
-        )
+        new_lang = data.split("_", 1)[1]
+        # for model B store in context for guest, DB for members
+        if user:
+            set_language(user_id, new_lang)
+        else:
+            context.user_data["language"] = new_lang
+        await q.edit_message_text(t({"language": new_lang}, "language_changed"))
+        return
 
     # تم
-    elif data.startswith("theme_"):
-        theme = data.split("_")[1]
-        set_theme(user_id, theme)
-        await update.callback_query.answer("Theme changed.")
-        await update.callback_query.edit_message_text(
-            t({"language": lang}, "theme_changed")
-        )
+    if data.startswith("theme_"):
+        theme = data.split("_", 1)[1]
+        if user:
+            set_theme(user_id, theme)
+        else:
+            context.user_data["theme"] = theme
+        await q.edit_message_text(t({"language": lang}, "theme_changed"))
+        return
+
+    # cancel download (if you send such callback)
+    if data == "cancel_download":
+        cancel_download(user_id)
+        await q.edit_message_text(t({"language": lang}, "cancel_download"))
+        return
 
 
 # ---------------------------
-# MAIN
+# MAIN - run safely (no asyncio.run around app.run_polling)
 # ---------------------------
-async def main():
+def main():
     init_db()
-    app = Application.builder().token("YOUR_BOT_TOKEN").build()
+    token = os.getenv("TOKEN") or os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN"
+
+    app = Application.builder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.run_polling()
+    logger.info("Bot starting with Application.run_polling() (safe mode)...")
+    app.run_polling()
+    logger.info("Bot stopped.")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
