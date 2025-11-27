@@ -1,84 +1,69 @@
 # downloader.py
-# async-friendly wrapper برای yt-dlp — اجرا در thread تا event loop مسدود نشود.
-import yt_dlp
-import asyncio
-import shutil
-from pathlib import Path
-from settings import DOWNLOAD_DIR, MAX_VIDEO_HEIGHT, DOWNLOAD_TIMEOUT
 import os
-import uuid
+import asyncio
+import yt_dlp
+from datetime import datetime
+from database import save_download, get_user
+from messages import t
 
-YTDLP_DEFAULT_OPTS = {
-    'format': f'bestvideo[height<={MAX_VIDEO_HEIGHT}]+bestaudio/best[height<={MAX_VIDEO_HEIGHT}]',
-    'outtmpl': str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
-    'noplaylist': True,
-    'retries': 3,
-    'quiet': True,
-    'no_warnings': True,
-}
+DOWNLOAD_FOLDER = "downloads"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-def _extract_platform(url: str) -> str:
-    u = url.lower()
-    if "youtube" in u or "youtu.be" in u:
-        return "YouTube"
-    if "tiktok" in u:
-        return "TikTok"
-    if "instagram" in u:
-        return "Instagram"
-    if "soundcloud" in u:
-        return "SoundCloud"
-    if "spotify" in u:
-        return "Spotify"
-    return "Unknown"
+download_tasks = {}   # { user_id: asyncio.Task }
+cancel_flags = {}      # { user_id: bool }
 
-def _yt_dlp_download(url: str, audio_only: bool = False):
-    opts = YTDLP_DEFAULT_OPTS.copy()
-    temp_id = str(uuid.uuid4())[:8]
-    opts['outtmpl'] = str(DOWNLOAD_DIR / f"{temp_id}_%(id)s.%(ext)s")
-    if audio_only:
-        opts['format'] = 'bestaudio/best'
-        # try mp3 conversion if ffmpeg available
-        opts['postprocessors'] = [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }]
+
+async def download_media(user_id, url, bot, lang):
+    """
+    دانلود با yt-dlp – کیفیت 360p ثابت – پشتیبانی از:
+    یوتیوب / اینستا / تیک‌تاک / اسپاتیفای / ساندکلود
+    """
+
+    cancel_flags[user_id] = False
+
+    msg = await bot.send_message(chat_id=user_id, text=t({"language": lang}, "downloading"))
+
+    ydl_opts = {
+        "format": "best[height<=360]",
+        "outtmpl": f"{DOWNLOAD_FOLDER}/%(id)s.%(ext)s",
+        "quiet": True,
+        "nocheckcertificate": True,
+        "noplaylist": True,
+    }
+
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            vid = info.get('id', '')
-            title = info.get('title', 'media')
-            matches = list(DOWNLOAD_DIR.glob(f"{temp_id}_*{vid}.*"))
-            if not matches:
-                matches = list(DOWNLOAD_DIR.glob(f"*{vid}.*"))
-            if not matches:
-                # fallback: take newest file with temp_id prefix
-                matches = list(DOWNLOAD_DIR.glob(f"{temp_id}_*.*"))
-            if not matches:
-                raise RuntimeError("فایل دانلود شده پیدا نشد.")
-            file_path = matches[0]
-            ext = file_path.suffix.lower()
-            file_type = 'audio' if audio_only or ext in ['.mp3', '.m4a', '.aac', '.ogg'] else 'video'
-            return str(file_path), title, file_type
-    except Exception as e:
-        raise
 
-async def download_url(url: str, audio_only: bool = False, timeout: int = DOWNLOAD_TIMEOUT):
-    loop = asyncio.get_running_loop()
-    try:
-        coro = asyncio.to_thread(_yt_dlp_download, url, audio_only)
-        res = await asyncio.wait_for(coro, timeout=timeout)
-        return res
-    except asyncio.TimeoutError:
-        raise RuntimeError("Timeout: دانلود طولانی شد.")
-    except Exception as e:
-        raise
+        file_id = info.get("id")
+        title = info.get("title", "video")
+        ext = info.get("ext", "mp4")
+        file_path = f"{DOWNLOAD_FOLDER}/{file_id}.{ext}"
 
-def safe_remove(path: str):
-    try:
-        if os.path.isfile(path):
-            os.remove(path)
-        elif os.path.isdir(path):
-            shutil.rmtree(path)
-    except Exception:
-        pass
+        # اگر کاربر لغو کرده
+        if cancel_flags.get(user_id):
+            await msg.edit_text(t({"language": lang}, "cancel_download"))
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return
+
+        # ارسال فایل
+        if ext in ["mp3", "m4a"]:
+            await bot.send_audio(chat_id=user_id, audio=open(file_path, "rb"), caption=title)
+        else:
+            await bot.send_video(chat_id=user_id, video=open(file_path, "rb"), caption=title)
+
+        await msg.delete()
+
+        # ذخیره در دیتابیس
+        save_download(user_id, url, title)
+
+        os.remove(file_path)
+
+    except Exception as e:
+        await msg.edit_text(t({"language": lang}, "download_error"))
+
+
+def cancel_download(user_id):
+    if user_id in cancel_flags:
+        cancel_flags[user_id] = True
