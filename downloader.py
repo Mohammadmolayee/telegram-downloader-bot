@@ -1,204 +1,104 @@
 # downloader.py
-import os
-import glob
-import tempfile
-import shutil
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+# wrapper برای yt_dlp که در ترد اجرا می‌شود تا event loop مسدود نشود.
+# سعی می‌کند خروجی صوتی را به mp3 تبدیل کند (اگر ffmpeg نصب باشد)، در غیر این صورت فایل صوتی خروجی اصلی را ارسال می‌کنیم.
+
 import yt_dlp
-import shutil as shmod
+import asyncio
+import shutil
+from pathlib import Path
+from settings import DOWNLOAD_DIR, MAX_VIDEO_HEIGHT, DOWNLOAD_TIMEOUT
+import os
+import uuid
 
-from config import DOWNLOAD_FOLDER, MAX_VIDEO_DOC_SIZE, YTDL_DEFAULT_VIDEO_FORMAT, YTDL_DEFAULT_AUDIO_FORMAT
-import database as db
+YTDLP_DEFAULT_OPTS = {
+    'format': f'bestvideo[height<={MAX_VIDEO_HEIGHT}]+bestaudio/best[height<={MAX_VIDEO_HEIGHT}]',
+    'outtmpl': str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
+    'noplaylist': True,
+    'retries': 3,
+    'quiet': True,
+    'no_warnings': True,
+    # 'merge_output_format': 'mp4',  # optional
+}
 
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+def _safe_filename(p: Path) -> str:
+    return str(p).replace(" ", "_")
 
-download_queue: asyncio.Queue = asyncio.Queue()
-canceled_jobs: set = set()
+def _extract_platform(url: str) -> str:
+    url_lower = url.lower()
+    if "youtube" in url_lower or "youtu.be" in url_lower:
+        return "YouTube"
+    if "tiktok" in url_lower:
+        return "TikTok"
+    if "instagram" in url_lower:
+        return "Instagram"
+    if "soundcloud" in url_lower:
+        return "SoundCloud"
+    if "spotify" in url_lower:
+        return "Spotify"
+    return "Unknown"
 
-_executor = ThreadPoolExecutor(max_workers=1)
-
-def _has_ffmpeg() -> bool:
-    return shmod.which("ffmpeg") is not None
-
-def _run_yt_dlp(ydl_opts, url, tmpdir):
+def _yt_dlp_download(url: str, audio_only: bool = False):
     """
-    Blocking call - executed in threadpool
-    Returns (file_path, info_dict)
+    This function runs inside a thread (not in asyncio loop).
+    Returns: (filepath: str, title: str, file_type: 'audio'|'video')
     """
-    # ensure outtmpl directory exists in opts
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-    # try to find the downloaded file in tmpdir
-    files = glob.glob(os.path.join(tmpdir, "*"))
-    files = sorted(files, key=lambda p: os.path.getmtime(p), reverse=True)
-    return (files[0] if files else None, info)
+    opts = YTDLP_DEFAULT_OPTS.copy()
+    temp_id = str(uuid.uuid4())[:8]
+    opts['outtmpl'] = str(DOWNLOAD_DIR / f"{temp_id}_%(id)s.%(ext)s")
+    # If audio requested, ask for bestaudio
+    if audio_only:
+        opts['format'] = 'bestaudio/best'
+        # try to extract mp3 via postprocessor (requires ffmpeg)
+        opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }]
 
-async def enqueue_download(user_id: int, chat_id: int, url: str):
-    job_id = os.urandom(8).hex()
-    await download_queue.put({"id": job_id, "user_id": user_id, "chat_id": chat_id, "url": url})
-    return job_id
-
-async def _process_job(bot, item):
-    job_id = item["id"]
-    user_id = item["user_id"]
-    chat_id = item["chat_id"]
-    url = item["url"]
-
-    # notify
     try:
-        status = await bot.send_message(chat_id, "⏳ در حال پردازش دانلود...")
-    except Exception:
-        status = None
-
-    # check cancel
-    if job_id in canceled_jobs:
-        if status:
-            try: await bot.send_message(chat_id, "🚫 دانلود لغو شد."); await status.delete() 
-            except: pass
-        return
-
-    tmpdir = tempfile.mkdtemp(dir=DOWNLOAD_FOLDER)
-    out_path = None
-    info = None
-    try:
-        lower = url.lower()
-        is_audio = any(x in lower for x in ("soundcloud", "spotify"))
-        has_ffmpeg = _has_ffmpeg()
-
-        if is_audio:
-            # audio options
-            if has_ffmpeg:
-                ydl_opts = {
-                    "format": YTDL_DEFAULT_AUDIO_FORMAT,
-                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-                    "noplaylist": True,
-                    "quiet": True,
-                    "postprocessors": [{
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "mp3",
-                        "preferredquality": "192",
-                    }]
-                }
-            else:
-                ydl_opts = {
-                    "format": YTDL_DEFAULT_AUDIO_FORMAT,
-                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-                    "noplaylist": True,
-                    "quiet": True,
-                }
-        else:
-            # video options - add headers for tiktok/user-agent to improve extraction
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            if has_ffmpeg:
-                ydl_opts = {
-                    "format": YTDL_DEFAULT_VIDEO_FORMAT,
-                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-                    "merge_output_format": "mp4",
-                    "noplaylist": True,
-                    "quiet": True,
-                    "headers": headers,
-                }
-            else:
-                # fallback when no ffmpeg: try produce mp4 directly
-                ydl_opts = {
-                    "format": "mp4/best",
-                    "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
-                    "noplaylist": True,
-                    "quiet": True,
-                    "headers": headers,
-                }
-
-        loop = asyncio.get_running_loop()
-        out_path, info = await loop.run_in_executor(_executor, _run_yt_dlp, ydl_opts, url, tmpdir)
-
-        if job_id in canceled_jobs:
-            if status:
-                try: await bot.send_message(chat_id, "🚫 دانلود لغو شد."); await status.delete()
-                except: pass
-            return
-
-        if not out_path or not os.path.exists(out_path):
-            try:
-                await bot.send_message(chat_id, "❌ فایل دانلود نشد یا پیدا نشد.")
-            except:
-                pass
-            return
-
-        size = os.path.getsize(out_path)
-        title = info.get("title", "file")
-        extractor = info.get("extractor", "unknown")
-
-        # send file: if audio preferred as mp3 and ffmpeg used, file ext likely .mp3
-        ext = os.path.splitext(out_path)[1].lower()
-        try:
-            if ext in (".mp3",) or any(x in out_path.lower() for x in [".mp3"]):
-                with open(out_path, "rb") as f:
-                    await bot.send_audio(chat_id, f, caption=title)
-            else:
-                # for video or other audio formats, send as document if large or as video if mp4
-                if ext in (".mp4", ".mkv", ".webm"):
-                    with open(out_path, "rb") as f:
-                        # if mp4 send as video, else document
-                        if ext == ".mp4":
-                            await bot.send_video(chat_id, f, caption=title)
-                        else:
-                            await bot.send_document(chat_id, f, caption=title)
-                else:
-                    # fallback: send as document
-                    with open(out_path, "rb") as f:
-                        await bot.send_document(chat_id, f, caption=title)
-        except Exception as e:
-            try:
-                await bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {e}")
-            except:
-                pass
-
-        # save to db
-        db.save_download(user_id, extractor, url, title, size)
-
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            # find downloaded file
+            video_id = info.get('id')
+            title = info.get('title') or "media"
+            # match file path by glob
+            # we will search for files that start with temp_id_ and contain video_id
+            matches = list(DOWNLOAD_DIR.glob(f"{temp_id}_*{video_id}.*"))
+            if not matches:
+                # try generic search for video_id
+                matches = list(DOWNLOAD_DIR.glob(f"*{video_id}.*"))
+            if not matches:
+                raise RuntimeError("فایل دانلود شده پیدا نشد")
+            file_path = matches[0]
+            ext = file_path.suffix.lower()
+            file_type = 'audio' if audio_only or ext in ['.mp3', '.m4a', '.webm', '.aac'] else 'video'
+            return str(file_path), title, file_type
     except Exception as e:
-        try:
-            await bot.send_message(chat_id, f"❌ خطا در دانلود: {e}")
-        except:
-            pass
-    finally:
-        try:
-            shutil.rmtree(tmpdir)
-        except:
-            pass
-        if status:
-            try:
-                await status.delete()
-            except:
-                pass
+        # bubble up
+        raise
 
-async def worker_loop(app):
-    bot = app.bot
-    while True:
+async def download_url(url: str, audio_only: bool = False, timeout: int = DOWNLOAD_TIMEOUT):
+    """
+    Async wrapper که در event loop فراخوانی می‌شود.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        coro = asyncio.to_thread(_yt_dlp_download, url, audio_only)
+        # Wrap with timeout to prevent blocking همیشگی
+        result = await asyncio.wait_for(coro, timeout=timeout)
+        return result  # (filepath, title, file_type)
+    except asyncio.TimeoutError:
+        raise RuntimeError("Timeout: دانلود طولانی شد یا معلق ماند.")
+    except Exception as e:
+        # Propagate upward with message
+        raise
+
+def safe_remove(path: str):
+    try:
+        os.remove(path)
+    except Exception:
         try:
-            item = await download_queue.get()
-            if item["id"] in canceled_jobs:
-                download_queue.task_done()
-                continue
-            await _process_job(bot, item)
-            download_queue.task_done()
+            # if dir
+            shutil.rmtree(path)
         except Exception:
-            await asyncio.sleep(1)
-
-async def cleanup_loop():
-    while True:
-        try:
-            now = asyncio.get_event_loop().time()
-            for name in os.listdir(DOWNLOAD_FOLDER):
-                full = os.path.join(DOWNLOAD_FOLDER, name)
-                try:
-                    if os.path.isdir(full):
-                        # remove directories older than 1 hour
-                        if (asyncio.get_event_loop().time() - os.path.getmtime(full)) > 3600:
-                            shutil.rmtree(full, ignore_errors=True)
-                except:
-                    pass
-        except:
             pass
-        await asyncio.sleep(600)
