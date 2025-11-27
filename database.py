@@ -1,109 +1,146 @@
 # database.py
-# ساده، امن، هر تابع اتصال خودش را باز و می‌بندد.
 import sqlite3
 from datetime import datetime, date
-from typing import Optional
-from settings import DB_PATH, GUEST_DAILY_LIMIT, USER_DAILY_LIMIT
+
+DB_PATH = "database.db"
+
+
+def connect():
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
+
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    c.execute("PRAGMA journal_mode=WAL;")
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        first_name TEXT,
-        lang TEXT DEFAULT 'fa',
-        created_at TEXT
-    )
+    db = connect()
+    cursor = db.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            username TEXT,
+            password TEXT,
+            language TEXT DEFAULT 'fa',
+            theme TEXT DEFAULT 'light',
+            is_member INTEGER DEFAULT 0,
+            created_at TEXT
+        )
     """)
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS downloads (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        platform TEXT,
-        url TEXT,
-        title TEXT,
-        file_type TEXT,
-        downloaded_at TEXT
-    )
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS downloads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            url TEXT,
+            timestamp TEXT
+        )
     """)
-    conn.commit()
-    conn.close()
 
-init_db()
+    db.commit()
+    db.close()
 
-# ---------- user ops ----------
-def create_user(user_id: int, username: Optional[str], first_name: Optional[str], lang: str = 'fa') -> bool:
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO users (user_id, username, first_name, lang, created_at) VALUES (?, ?, ?, ?, ?)",
-                  (user_id, username, first_name, lang, datetime.utcnow().isoformat()))
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        conn.close()
 
-def user_exists(user_id: int) -> bool:
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
-    ex = c.fetchone() is not None
-    conn.close()
-    return ex
+# -------------------------
+# USER MANAGEMENT
+# -------------------------
+def user_exists(user_id):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("SELECT 1 FROM users WHERE user_id = ?", (user_id,))
+    exists = cursor.fetchone() is not None
+    db.close()
+    return exists
 
-def get_user_lang(user_id: int) -> str:
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    c.execute("SELECT lang FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else 'fa'
 
-def set_user_lang(user_id: int, lang: str):
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    c.execute("UPDATE users SET lang = ? WHERE user_id = ?", (lang, user_id))
-    conn.commit()
-    conn.close()
+def create_user(user_id, name, username, password):
+    db = connect()
+    cursor = db.cursor()
 
-# ---------- download ops ----------
-def save_download(user_id: int, platform: str, url: str, title: str, file_type: str):
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    c.execute("INSERT INTO downloads (user_id, platform, url, title, file_type, downloaded_at) VALUES (?, ?, ?, ?, ?, ?)",
-              (user_id, platform, url, title, file_type, datetime.utcnow().isoformat()))
-    conn.commit()
-    conn.close()
+    cursor.execute("""
+        INSERT INTO users (user_id, name, username, password, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user_id, name, username, password, datetime.now().isoformat()))
 
-def get_downloads_recent(user_id: int, limit: int = 5):
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    c.execute("SELECT platform, title, file_type, downloaded_at FROM downloads WHERE user_id = ? ORDER BY downloaded_at DESC LIMIT ?",
-              (user_id, limit))
-    rows = c.fetchall()
-    conn.close()
+    db.commit()
+    db.close()
+
+
+def get_user(user_id):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    db.close()
+    return row
+
+
+def set_language(user_id, lang):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("UPDATE users SET language = ? WHERE user_id = ?", (lang, user_id))
+    db.commit()
+    db.close()
+
+
+def set_theme(user_id, theme):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("UPDATE users SET theme = ? WHERE user_id = ?", (theme, user_id))
+    db.commit()
+    db.close()
+
+
+def authenticate_user(user_id, username, password):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT 1 FROM users
+        WHERE user_id = ? AND username = ? AND password = ?
+    """, (user_id, username, password))
+    ok = cursor.fetchone() is not None
+    db.close()
+    return ok
+
+
+# -------------------------
+# DOWNLOAD RECORDS
+# -------------------------
+def add_download(user_id, url):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("""
+        INSERT INTO downloads (user_id, url, timestamp)
+        VALUES (?, ?, ?)
+    """, (user_id, url, datetime.now().isoformat()))
+    db.commit()
+    db.close()
+
+
+def get_daily_downloads(user_id):
+    today = date.today().isoformat()
+    db = connect()
+    cursor = db.cursor()
+
+    cursor.execute("""
+        SELECT COUNT(*) FROM downloads
+        WHERE user_id = ? AND timestamp LIKE ?
+    """, (user_id, today + "%"))
+
+    count = cursor.fetchone()[0]
+    db.close()
+    return count
+
+
+def get_recent_downloads(user_id, limit=10):
+    db = connect()
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT url, timestamp
+        FROM downloads
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+    """, (user_id, limit))
+
+    rows = cursor.fetchall()
+    db.close()
     return rows
-
-def downloads_count_today(user_id: int) -> int:
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    c = conn.cursor()
-    today_str = date.today().isoformat()
-    c.execute("SELECT COUNT(*) FROM downloads WHERE user_id = ? AND date(downloaded_at) = ?", (user_id, today_str))
-    cnt = c.fetchone()[0]
-    conn.close()
-    return cnt
-
-def can_download(user_id: int) -> bool:
-    # if not user -> guest
-    if not user_exists(user_id):
-        return downloads_count_today(user_id) < GUEST_DAILY_LIMIT
-    else:
-        return downloads_count_today(user_id) < USER_DAILY_LIMIT
-
-def get_limits(user_id: int) -> int:
-    return USER_DAILY_LIMIT if user_exists(user_id) else GUEST_DAILY_LIMIT
