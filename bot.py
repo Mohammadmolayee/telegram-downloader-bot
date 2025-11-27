@@ -87,14 +87,82 @@ async def create_account_start(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text("لطفا نام کامل خود را ارسال کنید:", reply_markup=KB.cancel_inline())
 
 async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Main router for text messages.
-    If the user is in account creation steps, handle that.
-    Otherwise, treat the message as a potential URL to download.
-    """
     user = update.effective_user
     text = update.message.text.strip()
 
+    # ---------------------------
+    # 🔹 دکمه‌های صفحه استارت
+    # ---------------------------
+    if text == "📖 راهنما":
+        return await update.message.reply_text(MSG.MESS['help_start'], reply_markup=KB.inline_back())
+
+    if text == "📜 قوانین":
+        return await update.message.reply_text(MSG.MESS['rules'], reply_markup=KB.inline_back())
+
+    if text == "ℐ درباره ما":
+        return await update.message.reply_text(MSG.MESS['about'], reply_markup=KB.inline_back())
+
+    if text == "🌐 زبان":
+        return await update.message.reply_text("زبان را انتخاب کنید:", reply_markup=KB.language_inline())
+
+    # ---------------------------
+    # 🔹 منوی اصلی
+    # ---------------------------
+    if text == "🧰 منوی اصلی":
+        return await update.message.reply_text(
+            MSG.MESS['main_menu'], reply_markup=KB.guest_main_reply()
+        )
+
+    if text == "📘 راهنمای منوی اصلی":
+        return await update.message.reply_text(MSG.MESS['main_menu'], reply_markup=KB.inline_back())
+
+    if text == "🔐 ساخت حساب":
+        return await create_account_start(update, context)
+
+    if text == "🤖 ورود خودکار":
+        if DB.user_exists(user.id):
+            return await send_panel(update, context)
+        else:
+            return await update.message.reply_text("❗ اول باید حساب بسازی.")
+
+    # ---------------------------
+    # 🔹 پنل کاربری (کاربر عضو)
+    # ---------------------------
+    if text == "📘 راهنمای پنل کاربری":
+        return await update.message.reply_text(MSG.MESS['help_panel'], reply_markup=KB.inline_back())
+
+    if text == "📥 دانلودهای اخیر":
+        rows = DB.get_downloads_recent(user.id)
+        if not rows:
+            return await update.message.reply_text("🔍 هیچ دانلودی ثبت نشده.")
+        msg = "📥 دانلودهای اخیر:\n\n"
+        for p,t,ft,dt in rows:
+            msg += f"• {p} | {ft}\n{t}\n⏱ {dt}\n\n"
+        return await update.message.reply_text(msg, reply_markup=KB.inline_back())
+
+    if text == "📊 وضعیت حساب":
+        cnt = DB.downloads_count_today(user.id)
+        msg = f"📊 وضعیت حساب:\n\nدانلودهای امروز: {cnt}/{DB.USER_DAILY_LIMIT}\nپلتفرم‌های فعال: همه"
+        return await update.message.reply_text(msg, reply_markup=KB.inline_back())
+
+    if text == "⚙️ تنظیمات":
+        return await update.message.reply_text("تنظیمات:", reply_markup=KB.language_inline())
+
+    if text == "🔙 بازگشت":
+        return await update.message.reply_text(MSG.MESS['start'], reply_markup=KB.start_reply_keyboard())
+
+    # ---------------------------
+    # 🔹 غیر از این‌ها: لینک؟ یا پیام اشتباه
+    # ---------------------------
+    if not (text.startswith("http://") or text.startswith("https://")):
+        return await update.message.reply_text("برای دانلود، یک لینک معتبر ارسال کنید.")
+
+    # ---------------------------
+    # 🔹 اگر لینک بود → برو برای دانلود
+    # ---------------------------
+    return await process_download(update, context, text)
+
+    
     # Cancel handling
     if context.user_data.get('create_step') == 'name' and text == '⛔️ لغو':
         context.user_data.clear()
@@ -179,6 +247,9 @@ async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 downloader.safe_remove(filepath)
         except Exception:
             pass
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(MSG.MESS['main_menu'], reply_markup=KB.guest_main_reply())
 
 # CallbackQuery handler for inline buttons
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
