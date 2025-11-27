@@ -1,27 +1,38 @@
 # settings.py
-# تنظیمات مرکزی پروژه
+"""
+تنظیمات کلی ربات
+"""
 
-import os
-from pathlib import Path
+# ---------------------
+# BOT & DATABASE
+# ---------------------
+BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+DB_PATH = "database.db"
 
-BASE_DIR = Path(__file__).parent
+# ---------------------
+# LIMITS
+# ---------------------
+GUEST_DAILY_LIMIT = 15
+USER_DAILY_LIMIT = 25
 
-TOKEN = os.getenv("TOKEN")
-if not TOKEN:
-    raise RuntimeError("توکن ربات را در متغیر محیطی TOKEN قرار بده (Railway/Env Vars).")
+# ---------------------
+# THEMES
+# ---------------------
+DEFAULT_THEME = "light"   # light / dark
 
-DOWNLOAD_DIR = BASE_DIR / "downloads"
-DOWNLOAD_DIR.mkdir(exist_ok=True)
+THEME_COLORS = {
+    "light": {
+        "bg": "🌤️",
+        "btn": "🔘"
+    },
+    "dark": {
+        "bg": "🌑",
+        "btn": "⚫"
+    }
+}
 
-DB_PATH = BASE_DIR / "downloads.db"
-
-# limits
-GUEST_DAILY_LIMIT = int(os.getenv("GUEST_DAILY_LIMIT", 15))
-USER_DAILY_LIMIT = int(os.getenv("USER_DAILY_LIMIT", 25))
-
-# yt-dlp / downloader
-MAX_VIDEO_HEIGHT = int(os.getenv("MAX_VIDEO_HEIGHT", 480))
-DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", 60 * 60 * 2))  # 2 hours
-
-# logging
-LOGGING_LEVEL = os.getenv("LOGGING_LEVEL", "INFO")
+# ---------------------
+# DOWNLOAD SETTINGS
+# ---------------------
+VIDEO_QUALITY = "480p"
+AUDIO_FORMAT = "mp3"
