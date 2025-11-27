@@ -1,29 +1,27 @@
 # settings.py
-# تنظیمات مرکزی ربات — محیط (ENV) خوانده می‌شود
+# تنظیمات مرکزی پروژه
+
 import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
 
-TOKEN = os.getenv("TOKEN")  # حتما در Railway/Env قرار بده
+TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    raise RuntimeError("TOKEN را در متغیرهای محیطی (Environment) تنظیم کن.")
+    raise RuntimeError("توکن ربات را در متغیر محیطی TOKEN قرار بده (Railway/Env Vars).")
 
 DOWNLOAD_DIR = BASE_DIR / "downloads"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 DB_PATH = BASE_DIR / "downloads.db"
 
-# محدودیت‌ها
-GUEST_DAILY_LIMIT = 15
-USER_DAILY_LIMIT = 25
+# limits
+GUEST_DAILY_LIMIT = int(os.getenv("GUEST_DAILY_LIMIT", 15))
+USER_DAILY_LIMIT = int(os.getenv("USER_DAILY_LIMIT", 25))
 
-# yt-dlp options defaults
-# کیفیت ویدیو (حداکثر height) — 480 برای سبک بودن سرور
-MAX_VIDEO_HEIGHT = 480
+# yt-dlp / downloader
+MAX_VIDEO_HEIGHT = int(os.getenv("MAX_VIDEO_HEIGHT", 480))
+DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", 60 * 60 * 2))  # 2 hours
 
-# تغییرات اختیاری: اندازه timeout برای دانلود (در ثانیه)
-DOWNLOAD_TIMEOUT = 60 * 60 * 2  # 2 ساعت برای ویدیوهای طولانی
-
-# اگر می‌خوای برای تست لاگ‌های بیشتر
+# logging
 LOGGING_LEVEL = os.getenv("LOGGING_LEVEL", "INFO")
