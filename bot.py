@@ -136,19 +136,17 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-def main():
-    db.init_db()
-    token = os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
-    if not token:
-        logger.error("TOKEN env var missing")
-        return
-    app = Application.builder().token(token).build()
+async def main():
+    init_db()
+    app = Application.builder().token("YOUR_BOT_TOKEN").build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(callbacks))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("Bot starting...")
-    app.run_polling()
-    logger.info("Bot stopped.")
+    app.add_handler(CallbackQueryHandler(callback))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+
+    await app.run_polling()
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+
