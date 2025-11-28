@@ -1,4 +1,4 @@
-# bot.py (fixed for missing keys + back behavior + stable menus)
+# bot.py
 import os
 import logging
 from telegram import Update
@@ -10,298 +10,232 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
-
-# ماژول‌های پروژه (مطمئن باش این فایل‌ها وجود دارند)
-from database import (
-    init_db, user_exists, create_user, login,
-    get_user, set_language, set_theme
-)
-from keyboards import (
-    start_keyboard, main_menu_keyboard, panel_keyboard,
-    settings_keyboard, language_inline, theme_inline
-)
-from downloader import download_media, cancel_download
-from messages import t  # t expects dict-like {"language": "fa"} and key
+from messages import t
+import keyboards as kb
+import database as db
+import downloader as dl
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# وضعیت موقت برای فلوها
-user_state = {}     # e.g. {user_id: "register_name" / "login_username" / ...}
-pending = {}        # temporary storage for registration/login
+# state holders
+_user_state = {}    # {user_id: step}
+_pending = {}       # {user_id: {...}}
 
+# helpers
+def lang_for_user(user_id, context):
+    user = db.get_user(user_id)
+    if user:
+        return user.get("language", "fa")
+    return context.user_data.get("language", "fa") or "fa"
 
-# --- helper to get text safely (fallback to literal if missing) ---
-def txt(ctx_user_lang, key, fallback=""):
-    # ctx_user_lang can be dict {"language": "fa"} or string 'fa'
-    if isinstance(ctx_user_lang, str):
-        lang_obj = {"language": ctx_user_lang}
-    else:
-        lang_obj = ctx_user_lang
-    try:
-        return t(lang_obj, key)
-    except Exception:
-        return fallback or key
+def theme_for_user(user_id, context):
+    user = db.get_user(user_id)
+    if user:
+        return user.get("theme", "light")
+    return context.user_data.get("theme", "light") or "light"
 
-
-# ---------------------------
-# send start menu (guest)
-# ---------------------------
-async def send_start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_lang = context.user_data.get("language", "fa")
-    context.user_data['last_menu'] = context.user_data.get('menu', None)
-    context.user_data['menu'] = 'start'
-    text = txt(user_lang, "start", "👋 سلام! به ربات خوش آمدی.\nلطفا یک گزینه انتخاب کن.")
-    await update.message.reply_text(text, reply_markup=start_keyboard(user_lang))
-
-
-# ---------------------------
-# send main menu (intro)
-# ---------------------------
-async def send_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_lang = context.user_data.get("language", "fa")
-    context.user_data['last_menu'] = context.user_data.get('menu', None)
-    context.user_data['menu'] = 'main_menu'
-    text = txt(user_lang, "main_menu", "🧰 منوی اصلی")
-    await update.message.reply_text(text, reply_markup=main_menu_keyboard(user_lang))
-
-
-# ---------------------------
-# send user panel (member)
-# ---------------------------
-async def send_user_panel(update: Update, context: ContextTypes.DEFAULT_TYPE, user_row=None):
-    user = user_row or get_user(update.effective_user.id)
-    lang = user.get("language", "fa") if user else context.user_data.get("language", "fa")
-    context.user_data['last_menu'] = context.user_data.get('menu', None)
-    context.user_data['menu'] = 'panel'
-    name = (user.get("name") if isinstance(user, dict) else None) or update.effective_user.first_name
-    # use panel_welcome key if exists
-    panel_text = txt(lang, "panel_welcome",
-                     f"👤 {name}\nبه پنل کاربری خوش آمدی.\nسقف دانلود امروز: { ( '25' if user_exists(update.effective_user.id) else '15') }")
-    await update.message.reply_text(panel_text, reply_markup=panel_keyboard(lang))
-
-
-# ---------------------------
-# /start handler
-# ---------------------------
+# start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    # if member -> send panel, else start menu
-    if user_exists(uid):
-        user = get_user(uid)
-        await send_user_panel(update, context, user_row=user)
+    if db.user_exists(uid):
+        user = db.get_user(uid)
+        lang = user.get("language", "fa")
+        text = t(user, "panel_welcome", user_name=user.get("name"), username=user.get("username"),
+                 theme=user.get("theme"), language=user.get("language"))
+        await update.message.reply_text(text, reply_markup=kb.panel_reply(lang))
+        context.user_data['menu'] = 'panel'
     else:
-        # set language from context if exists
         lang = context.user_data.get("language", "fa")
-        await send_start_menu(update, context)
+        await update.message.reply_text(t({"language": lang}, "start_guest"), reply_markup=kb.start_reply(lang))
+        context.user_data['menu'] = 'start'
 
-
-# ---------------------------
-# main message handler
-# ---------------------------
+# message handler
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     text = update.message.text.strip()
     uid = update.effective_user.id
-    user = get_user(uid)
-    lang = (user.get("language") if user else context.user_data.get("language", "fa")) or "fa"
+    user = db.get_user(uid)
+    lang = lang_for_user(uid, context)
 
-    # --------- BACK handling (reply keyboard) ----------
+    # universal back button (reply keyboard)
     if text in ["🔙 بازگشت", "🔙 Back"]:
-        last = context.user_data.get('last_menu')
-        # if last menu exists, navigate there
-        if last == 'panel' and user:
-            await send_user_panel(update, context, user_row=user)
+        menu = context.user_data.get("menu", "start")
+        if menu == "panel" and db.user_exists(uid):
+            await update.message.reply_text(t({"language": lang}, "panel_welcome",
+                                              user_name=user.get("name"), username=user.get("username"),
+                                              theme=user.get("theme"), language=user.get("language")),
+                                            reply_markup=kb.panel_reply(lang))
+            context.user_data['menu'] = 'panel'
             return
-        if last == 'main_menu':
-            await send_main_menu(update, context)
-            return
-        # default: go to start
-        await send_start_menu(update, context)
+        # default to start
+        await update.message.reply_text(t({"language": lang}, "start_guest"), reply_markup=kb.start_reply(lang))
+        context.user_data['menu'] = 'start'
         return
 
-    # --------- start menu buttons ----------
+    # start menu buttons (guest)
     if text in ["📖 راهنما", "📖 Help"]:
         key = "help_member" if user else "help_guest"
-        await update.message.reply_text(txt(lang, key, "راهنمای استفاده"), reply_markup=None)
+        await update.message.reply_text(t({"language": lang}, key), reply_markup=kb.start_reply(lang) if not user else kb.panel_reply(lang))
         return
 
     if text in ["📜 قوانین", "📜 Rules"]:
-        await update.message.reply_text(txt(lang, "rules", "قوانین ربات"), reply_markup=None)
+        await update.message.reply_text(t({"language": lang}, "rules"), reply_markup=kb.start_reply(lang) if not user else kb.panel_reply(lang))
         return
 
     if text in ["ℹ درباره ما", "ℹ About"]:
-        await update.message.reply_text(txt(lang, "about", "درباره ما"), reply_markup=None)
+        await update.message.reply_text(t({"language": lang}, "about"), reply_markup=kb.start_reply(lang) if not user else kb.panel_reply(lang))
         return
 
     if text in ["🌐 زبان", "🌐 Language"]:
-        await update.message.reply_text(txt(lang, "choose_language", "زبان را انتخاب کنید:"), reply_markup=language_inline())
+        await update.message.reply_text(t({"language": lang}, "choose_language"), reply_markup=kb.language_inline())
         return
 
-    if text in ["🧰 منوی اصلی", "🧰 Main Menu"]:
-        await send_main_menu(update, context)
-        return
-
-    # --------- Main menu actions (register/login) ----------
+    # create account (in guest panel)
     if text in ["👤 ساخت حساب", "👤 Create Account"]:
-        # start registration flow
-        user_state[uid] = "reg_name"
-        await update.message.reply_text(txt(lang, "enter_name", "لطفاً نام کامل را ارسال کنید:"))
+        _user_state[uid] = "reg_name"
+        await update.message.reply_text(t({"language": lang}, "reg_name"))
         return
 
-    if user_state.get(uid) == "reg_name":
-        pending[uid] = {"name": text}
-        user_state[uid] = "reg_username"
-        await update.message.reply_text(txt(lang, "enter_username", "حالا یوزرنیم را بفرست (بدون @):"))
+    # registration flow
+    if _user_state.get(uid) == "reg_name":
+        _pending[uid] = {"name": text}
+        _user_state[uid] = "reg_username"
+        await update.message.reply_text(t({"language": lang}, "reg_username"))
         return
 
-    if user_state.get(uid) == "reg_username":
-        pending[uid]["username"] = text.lstrip("@")
-        user_state[uid] = "reg_password"
-        await update.message.reply_text(txt(lang, "enter_password", "حالا یک پسورد ۸-۱۲ کاراکتری بفرست:"))
+    if _user_state.get(uid) == "reg_username":
+        _pending[uid]["username"] = text.lstrip("@")
+        _user_state[uid] = "reg_password"
+        await update.message.reply_text(t({"language": lang}, "reg_password"))
         return
 
-    if user_state.get(uid) == "reg_password":
-        info = pending.get(uid, {})
+    if _user_state.get(uid) == "reg_password":
+        info = _pending.get(uid, {})
         name = info.get("name") or update.effective_user.first_name
         username = info.get("username") or f"user{uid}"
         password = text
-        ok = create_user(uid, name, username, password)
-        # cleanup
-        user_state.pop(uid, None)
-        pending.pop(uid, None)
+        ok = db.create_user(uid, name, username, password)
+        _user_state.pop(uid, None)
+        _pending.pop(uid, None)
         if ok:
-            await update.message.reply_text(txt(lang, "reg_done", "🎉 حساب ساخته شد! برای ورود از '🔐 ورود' استفاده کن."),
-                                            reply_markup=start_keyboard(lang))
+            # auto login: send panel
+            user = db.get_user(uid)
+            await update.message.reply_text(t({"language": lang}, "reg_done"), reply_markup=kb.panel_reply(lang))
+            # send panel details
+            await update.message.reply_text(t(user, "panel_welcome", user_name=user.get("name"),
+                                              username=user.get("username"),
+                                              theme=user.get("theme"),
+                                              language=user.get("language")),
+                                            reply_markup=kb.panel_reply(lang))
+            context.user_data['menu'] = 'panel'
         else:
-            await update.message.reply_text(txt(lang, "reg_fail", "❌ خطا یا یوزرنیم تکراری است. دوباره تلاش کن."))
+            await update.message.reply_text(t({"language": lang}, "reg_fail"), reply_markup=kb.start_reply(lang))
         return
 
-    # --------- login flow ----------
-    if text in ["🔐 ورود", "🔐 Login"]:
-        user_state[uid] = "login_username"
-        await update.message.reply_text(txt(lang, "login_username", "یوزرنیم را ارسال کنید:"))
-        return
-
-    if user_state.get(uid) == "login_username":
-        pending[uid] = {"username": text.lstrip("@")}
-        user_state[uid] = "login_password"
-        await update.message.reply_text(txt(lang, "login_password", "پسورد را ارسال کنید:"))
-        return
-
-    if user_state.get(uid) == "login_password":
-        username = pending.get(uid, {}).get("username")
-        password = text
-        found = login(username, password)
-        user_state.pop(uid, None)
-        pending.pop(uid, None)
-        if found:
-            # login ok -> send panel
-            await update.message.reply_text(txt(lang, "login_success", "✅ ورود موفق!"), reply_markup=panel_keyboard(lang))
-            await send_user_panel(update, context)
+    # panel buttons (for logged users) and guest download button
+    if text in ["📥 دانلود", "📥 Download", "📥 دانلود (مهمان)", "📥 Download (Guest)"]:
+        # if in main start area and guest, allow guest download or instruct
+        if not db.user_exists(uid):
+            # allow guest limited: Instagram & Spotify
+            await update.message.reply_text(t({"language": lang}, "guest_download"), reply_markup=kb.start_reply(lang))
+            context.user_data['menu'] = 'start'
+            return
         else:
-            await update.message.reply_text(txt(lang, "login_fail", "❌ یوزرنیم یا پسورد اشتباه است."))
+            await update.message.reply_text(t({"language": lang}, "downloading"), reply_markup=kb.panel_reply(lang))
+            context.user_data['menu'] = 'panel'
+            return
+
+    if text in ["📖 راهنمای پنل", "📖 Panel Help"]:
+        await update.message.reply_text(t({"language": lang}, "help_member"), reply_markup=kb.panel_reply(lang))
         return
 
-    # --------- settings commands ----------
     if text in ["🎨 تنظیمات", "🎨 Settings"]:
-        await update.message.reply_text(txt(lang, "settings", "تنظیمات"), reply_markup=settings_keyboard(lang))
+        await update.message.reply_text(t({"language": lang}, "settings"), reply_markup=kb.settings_reply(lang))
         return
 
     if text in ["🌐 تغییر زبان", "🌐 Change Language"]:
-        await update.message.reply_text(txt(lang, "choose_language", "زبان را انتخاب کنید"), reply_markup=language_inline())
+        await update.message.reply_text(t({"language": lang}, "choose_language"), reply_markup=kb.language_inline())
         return
 
     if text in ["🎨 تغییر تم", "🎨 Theme"]:
-        await update.message.reply_text(txt(lang, "choose_theme", "تم را انتخاب کنید"), reply_markup=theme_inline())
+        await update.message.reply_text(t({"language": lang}, "choose_theme"), reply_markup=kb.theme_inline())
         return
 
-    # --------- download link handling ----------
+    # If message is a URL -> attempt download
     if text.startswith("http"):
-        # if user is in main_menu (intro) we disallow downloading (as requested)
-        if context.user_data.get("menu") == "main_menu":
-            await update.message.reply_text(txt(lang, "guest_download_block",
-                                                "برای دانلود در این بخش امکان‌پذیر نیست. لطفاً به استارت یا پنل مراجعه کن."))
+        # check menu block: if user in "start" but pressed non-guest-download button we block
+        cur_menu = context.user_data.get("menu", "start")
+        # Allow download in start (guest) and panel
+        if cur_menu == "main_menu":
+            await update.message.reply_text(t({"language": lang}, "guest_download_block"))
             return
-
-        # schedule download in application task
+        # schedule background download using downloader.start_download_task
         try:
-            # store menu context so back works while downloading
-            context.user_data['menu'] = 'downloading'
-            context.user_data['last_menu'] = context.user_data.get('menu')
-            # create task safely via application
-            context.application.create_task(download_media(uid, text, context.bot, lang))
-            await update.message.reply_text(txt(lang, "downloading", "⏳ دانلود آغاز شد..."), reply_markup=None)
+            # schedule: user-specific language
+            user_lang = lang
+            await dl.start_download_task(context.application, uid, text, user_lang)
+            await update.message.reply_text(t({"language": user_lang}, "downloading"), reply_markup=kb.cancel_inline(user_lang))
         except Exception as e:
-            logger.exception("create_task failed")
-            await update.message.reply_text(txt(lang, "download_error", "خطا در شروع دانلود"))
+            logger.exception("Failed to start download task")
+            await update.message.reply_text(t({"language": lang}, "download_error"))
         return
 
-    # unknown input
-    await update.message.reply_text(txt(lang, "unknown", "برای دانلود یک لینک ارسال کنید یا از منو استفاده کن."))
+    # unknown
+    await update.message.reply_text(t({"language": lang}, "unknown"), reply_markup=kb.start_reply(lang))
 
 
-# ---------------------------
-# callback handler (inline buttons)
-# ---------------------------
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# callback handler for inline keyboards (language/theme/cancel)
+async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q:
         return
     await q.answer()
     data = q.data
     uid = q.from_user.id
-    user = get_user(uid)
-    lang = (user.get("language") if user else context.user_data.get("language", "fa")) or "fa"
+    user = db.get_user(uid)
+    lang = lang_for_user(uid, context)
 
-    # language change
     if data.startswith("lang_"):
-        new_lang = data.split("_", 1)[1]
+        new = data.split("_", 1)[1]
         if user:
-            set_language(uid, new_lang)
+            db.set_language(uid, new)
         else:
-            context.user_data["language"] = new_lang
-        await q.edit_message_text(txt(new_lang, "language_changed", "✅ زبان تغییر کرد."))
+            context.user_data["language"] = new
+        await q.edit_message_text(t({"language": new}, "lang_changed"))
         return
 
-    # theme change
     if data.startswith("theme_"):
-        theme = data.split("_", 1)[1]
+        new = data.split("_", 1)[1]
         if user:
-            set_theme(uid, theme)
+            db.set_theme(uid, new)
         else:
-            context.user_data["theme"] = theme
-        await q.edit_message_text(txt(lang, "theme_changed", "🎨 تم تغییر کرد."))
+            context.user_data["theme"] = new
+        await q.edit_message_text(t({"language": lang}, "theme_changed"))
         return
 
-    # cancel download via inline
     if data == "cancel_download":
-        cancel_download(uid)
-        await q.edit_message_text(txt(lang, "cancel_download", "🚫 دانلود لغو شد."))
+        dl.cancel_download(uid)
+        await q.edit_message_text(t({"language": lang}, "cancel_download"))
         return
 
-    # fallback
-    await q.edit_message_text(txt(lang, "unknown", "عملیات نامشخص."))
-
-
-# ---------------------------
-# MAIN (synchronous run_polling)
-# ---------------------------
+# main (synchronous run_polling)
 def main():
-    init_db()
-    token = os.getenv("TOKEN") or os.getenv("BOT_TOKEN") or "YOUR_BOT_TOKEN"
+    db.init_db()
+    token = os.getenv("TOKEN") or os.getenv("BOT_TOKEN") or ""
+    if not token:
+        logger.error("TOKEN environment variable not set. Set TOKEN in Railway variables.")
+        return
     app = Application.builder().token(token).build()
 
-    # handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(CallbackQueryHandler(callbacks))
 
-    logger.info("Starting bot (run_polling)...")
+    logger.info("Bot is starting (run_polling)...")
     app.run_polling()
     logger.info("Bot stopped.")
-
 
 if __name__ == "__main__":
     main()
