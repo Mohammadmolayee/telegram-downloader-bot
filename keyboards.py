@@ -1,71 +1,31 @@
 # keyboards.py
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+import translator as tr
 
 def start_reply(lang="fa"):
-    if lang == "en":
-        rows = [
-            ["📖 Help", "📜 Rules"],
-            ["ℹ About", "⭐ Features"],
-            ["🌐 Language", "👤 Create Account"],
-            ["🔙 Back"]
-        ]
-    elif lang == "ar":
-        rows = [
-            ["📖 تعليمات", "📜 القوانين"],
-            ["ℹ حول", "⭐ الميزات"],
-            ["🌐 اللغة", "👤 انشاء حساب"],
-            ["🔙 رجوع"]
-        ]
-    else:
-        rows = [
-            ["📖 راهنما", "📜 قوانین"],
-            ["ℹ درباره ما", "⭐ قابلیت‌ها"],
-            ["🌐 زبان", "👤 ساخت حساب"],
-            ["🔙 بازگشت"]
-        ]
+    rows = [
+        [tr.btn(lang, "BTN_HELP"), tr.btn(lang, "BTN_RULES")],
+        [tr.btn(lang, "BTN_ABOUT"), tr.btn(lang, "BTN_FEATURES")],
+        [tr.btn(lang, "BTN_LANGUAGE"), tr.btn(lang, "BTN_CREATE")],
+        [tr.btn(lang, "BTN_BACK")]
+    ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 def panel_reply(lang="fa"):
-    if lang == "en":
-        rows = [
-            ["📥 Download", "⭐ Features"],
-            ["📖 Panel Help", "📜 Rules"],
-            ["ℹ About", "🌐 Language"],
-            ["🎨 Settings", "🔙 Back"]
-        ]
-    elif lang == "ar":
-        rows = [
-            ["📥 تحميل", "⭐ الميزات"],
-            ["📖 مساعدة اللوحة", "📜 القوانين"],
-            ["ℹ حول", "🌐 اللغة"],
-            ["🎨 الاعدادات", "🔙 رجوع"]
-        ]
-    else:
-        rows = [
-            ["📥 دانلود", "⭐ قابلیت‌ها"],
-            ["📖 راهنمای پنل", "📜 قوانین"],
-            ["ℹ درباره ما", "🌐 زبان"],
-            ["🎨 تنظیمات", "🔙 بازگشت"]
-        ]
+    rows = [
+        [tr.btn(lang, "BTN_DOWNLOAD"), tr.btn(lang, "BTN_FEATURES")],
+        [tr.btn(lang, "BTN_PANEL_HELP"), tr.btn(lang, "BTN_RULES")],
+        [tr.btn(lang, "BTN_ABOUT"), tr.btn(lang, "BTN_LANGUAGE")],
+        [tr.btn(lang, "BTN_SETTINGS"), tr.btn(lang, "BTN_BACK")]
+    ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 def settings_reply(lang="fa"):
-    if lang == "en":
-        rows = [["🌐 Change Language", "🎨 Theme"], ["🔙 Back"]]
-    elif lang == "ar":
-        rows = [["🌐 تغيير اللغة", "🎨 النمط"], ["🔙 رجوع"]]
-    else:
-        rows = [["🌐 تغییر زبان", "🎨 تغییر تم"], ["🔙 بازگشت"]]
+    rows = [[tr.btn(lang, "BTN_LANGUAGE"), tr.btn(lang, "BTN_SETTINGS")], [tr.btn(lang, "BTN_BACK")]]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 def back_only(lang="fa"):
-    if lang == "en":
-        rows = [["🔙 Back"]]
-    elif lang == "ar":
-        rows = [["🔙 رجوع"]]
-    else:
-        rows = [["🔙 بازگشت"]]
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
+    return ReplyKeyboardMarkup([[tr.btn(lang, "BTN_BACK")]], resize_keyboard=True, one_time_keyboard=True)
 
 def language_inline():
     return InlineKeyboardMarkup([
@@ -81,5 +41,4 @@ def theme_inline():
     ])
 
 def cancel_inline(lang="fa"):
-    text = "لغو دانلود" if lang == "fa" else ("Cancel" if lang == "en" else "إلغاء")
-    return InlineKeyboardMarkup([[InlineKeyboardButton(text, callback_data="cancel_download")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton(tr.btn(lang, "BTN_CANCEL"), callback_data="cancel_download")]])
