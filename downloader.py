@@ -4,7 +4,7 @@ import asyncio
 import shutil
 import yt_dlp
 from database import save_download
-from messages import t
+import translator as tr
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -25,13 +25,13 @@ def _blocking_download(url, outtmpl):
     return info
 
 async def download_and_send(user_id, url, bot, lang):
-    status_msg = await bot.send_message(chat_id=user_id, text=t({"language": lang}, "downloading"))
+    status_msg = await bot.send_message(chat_id=user_id, text=tr.t(lang, "downloading"))
     outtmpl = os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s")
     try:
         info = await asyncio.to_thread(_blocking_download, url, outtmpl)
     except Exception:
         try:
-            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=t({"language": lang}, "download_error"))
+            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=tr.t(lang, "download_error"))
         except Exception:
             pass
         return
@@ -39,7 +39,7 @@ async def download_and_send(user_id, url, bot, lang):
     if _cancel_flags.get(user_id):
         _cancel_flags.pop(user_id, None)
         try:
-            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=t({"language": lang}, "cancel_download"))
+            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=tr.t(lang, "cancel_download"))
         except Exception:
             pass
         return
@@ -53,7 +53,7 @@ async def download_and_send(user_id, url, bot, lang):
         if cand:
             file_path = os.path.join(DOWNLOAD_DIR, cand[0])
         else:
-            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=t({"language": lang}, "download_error"))
+            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=tr.t(lang, "download_error"))
             return
 
     try:
@@ -61,8 +61,8 @@ async def download_and_send(user_id, url, bot, lang):
     except Exception:
         bot_username = "@professional_dawnloder_bot"
 
-    by_line = t({"language": lang}, "download_by").format(bot_username=bot_username)
-    details = t({"language": lang}, "download_details_line").format(title=title, url=url, by_line=by_line)
+    by_line = tr.t(lang, "download_by").format(bot_username=bot_username)
+    details = tr.t(lang, "download_details_line").format(title=title, url=url, by_line=by_line)
 
     try:
         audio_exts = {"mp3", "m4a", "aac", "opus", "wav"}
@@ -81,7 +81,7 @@ async def download_and_send(user_id, url, bot, lang):
                 ftype = "document"
     except Exception:
         try:
-            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=t({"language": lang}, "download_error"))
+            await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=tr.t(lang, "download_error"))
         except Exception:
             pass
         try:
@@ -91,7 +91,7 @@ async def download_and_send(user_id, url, bot, lang):
         return
 
     try:
-        await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=t({"language": lang}, "download_finished"))
+        await bot.edit_message_text(chat_id=user_id, message_id=status_msg.message_id, text=tr.t(lang, "download_finished"))
     except Exception:
         pass
 
