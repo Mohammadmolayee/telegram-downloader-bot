@@ -136,17 +136,21 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def main():
+from telegram.ext import Application
+
+def main():
     init_db()
+
     app = Application.builder().token("YOUR_BOT_TOKEN").build()
 
+    # Handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
 
