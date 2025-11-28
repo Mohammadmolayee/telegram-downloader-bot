@@ -1,51 +1,72 @@
 # keyboards.py
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 
-# reply keyboards (always visible at bottom) — includes the universal "🔙 بازگشت"
 def start_reply(lang="fa"):
     if lang == "en":
-        return ReplyKeyboardMarkup([
-            ["📥 Download (Guest)", "📖 Help"],
-            ["📜 Rules", "ℹ About"],
+        rows = [
+            ["📖 Help", "📜 Rules"],
+            ["ℹ About", "⭐ Features"],
             ["🌐 Language", "👤 Create Account"],
             ["🔙 Back"]
-        ], resize_keyboard=True)
-    # default Persian
-    return ReplyKeyboardMarkup([
-        ["📥 دانلود (مهمان)", "📖 راهنما"],
-        ["📜 قوانین", "ℹ درباره ما"],
-        ["🌐 زبان", "👤 ساخت حساب"],
-        ["🔙 بازگشت"]
-    ], resize_keyboard=True)
-
+        ]
+    elif lang == "ar":
+        rows = [
+            ["📖 تعليمات", "📜 القوانين"],
+            ["ℹ حول", "⭐ الميزات"],
+            ["🌐 اللغة", "👤 انشاء حساب"],
+            ["🔙 رجوع"]
+        ]
+    else:
+        rows = [
+            ["📖 راهنما", "📜 قوانین"],
+            ["ℹ درباره ما", "⭐ قابلیت‌ها"],
+            ["🌐 زبان", "👤 ساخت حساب"],
+            ["🔙 بازگشت"]
+        ]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 def panel_reply(lang="fa"):
     if lang == "en":
-        return ReplyKeyboardMarkup([
-            ["📥 Download", "📖 Panel Help"],
-            ["📜 Rules", "ℹ About"],
+        rows = [
+            ["📥 Download", "⭐ Features"],
+            ["📖 Panel Help", "📜 Rules"],
+            ["ℹ About", "🌐 Language"],
             ["🎨 Settings", "🔙 Back"]
-        ], resize_keyboard=True)
-    return ReplyKeyboardMarkup([
-        ["📥 دانلود", "📖 راهنمای پنل"],
-        ["📜 قوانین", "ℹ درباره ما"],
-        ["🎨 تنظیمات", "🔙 بازگشت"]
-    ], resize_keyboard=True)
-
+        ]
+    elif lang == "ar":
+        rows = [
+            ["📥 تحميل", "⭐ الميزات"],
+            ["📖 مساعدة اللوحة", "📜 القوانين"],
+            ["ℹ حول", "🌐 اللغة"],
+            ["🎨 الاعدادات", "🔙 رجوع"]
+        ]
+    else:
+        rows = [
+            ["📥 دانلود", "⭐ قابلیت‌ها"],
+            ["📖 راهنمای پنل", "📜 قوانین"],
+            ["ℹ درباره ما", "🌐 زبان"],
+            ["🎨 تنظیمات", "🔙 بازگشت"]
+        ]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 def settings_reply(lang="fa"):
     if lang == "en":
-        return ReplyKeyboardMarkup([
-            ["🌐 Change Language", "🎨 Theme"],
-            ["🔙 Back"]
-        ], resize_keyboard=True)
-    return ReplyKeyboardMarkup([
-        ["🌐 تغییر زبان", "🎨 تغییر تم"],
-        ["🔙 بازگشت"]
-    ], resize_keyboard=True)
+        rows = [["🌐 Change Language", "🎨 Theme"], ["🔙 Back"]]
+    elif lang == "ar":
+        rows = [["🌐 تغيير اللغة", "🎨 النمط"], ["🔙 رجوع"]]
+    else:
+        rows = [["🌐 تغییر زبان", "🎨 تغییر تم"], ["🔙 بازگشت"]]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
+def back_only(lang="fa"):
+    if lang == "en":
+        rows = [["🔙 Back"]]
+    elif lang == "ar":
+        rows = [["🔙 رجوع"]]
+    else:
+        rows = [["🔙 بازگشت"]]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, one_time_keyboard=True)
 
-# Inline keyboards (small popups) for language/theme selection
 def language_inline():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa"),
@@ -53,16 +74,12 @@ def language_inline():
         [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")]
     ])
 
-
 def theme_inline():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌙 دارک (Dark)", callback_data="theme_dark"),
-         InlineKeyboardButton("☀️ لایت (Light)", callback_data="theme_light")]
+        [InlineKeyboardButton("🌙 Dark", callback_data="theme_dark"),
+         InlineKeyboardButton("☀️ Light", callback_data="theme_light")]
     ])
 
-
-# small inline for cancel actions
 def cancel_inline(lang="fa"):
-    if lang == "en":
-        return InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel_download")]])
-    return InlineKeyboardMarkup([[InlineKeyboardButton("لغو دانلود", callback_data="cancel_download")]])
+    text = "لغو دانلود" if lang == "fa" else ("Cancel" if lang == "en" else "إلغاء")
+    return InlineKeyboardMarkup([[InlineKeyboardButton(text, callback_data="cancel_download")]])
