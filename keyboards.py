@@ -1,36 +1,23 @@
-# keyboards.py
 from telegram import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-from translator import tr
-from messages import msg
 
-def start_guest_kb(lang):
+def guest_keyboard(lang):
     return ReplyKeyboardMarkup([
-        [tr("📖 راهنما", lang), tr("📜 قوانین", lang)],
-        [tr("ℹ درباره ما", lang), tr("🌐 زبان", lang)],
-        [tr("👤 ساخت حساب", lang)],
+        ["📖 راهنما" if lang=="fa" else "📖 Help",
+         "🌐 زبان" if lang=="fa" else "🌐 Language"],
+        ["👤 ساخت حساب" if lang=="fa" else "👤 Create Account"]
     ], resize_keyboard=True)
 
-def member_panel_kb(lang):
+def member_keyboard(lang):
     return ReplyKeyboardMarkup([
-        [tr("📥 قابلیت‌ها", lang)],
-        [tr("📖 راهنما", lang), tr("📜 قوانین", lang)],
-        [tr("ℹ درباره ما", lang), tr("🌐 زبان", lang)],
+        ["📥 دانلود"],
+        ["📖 راهنما" if lang=="fa" else "📖 Help",
+         "🌐 زبان" if lang=="fa" else "🌐 Language"],
+        ["🔙 بازگشت" if lang=="fa" else "🔙 Back"]
     ], resize_keyboard=True)
-
-def capabilities_kb(lang):
-    return ReplyKeyboardMarkup([
-        [tr("🎬 یوتیوب", lang), tr("🎵 اینستاگرام", lang)],
-        [tr("🎧 تیک‌تاک", lang), tr("🎼 ساندکلاد", lang)],
-        [tr("🎶 اسپاتیفای", lang)],
-        [tr("🔙 برگشت", lang)]
-    ], resize_keyboard=True)
-
-def back_btn(lang):
-    return ReplyKeyboardMarkup([[tr("🔙 برگشت", lang)]], resize_keyboard=True)
 
 def language_inline():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa")],
-        [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
-        [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")],
+        [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")],
+        [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")]
     ])
