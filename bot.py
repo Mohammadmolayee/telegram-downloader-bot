@@ -138,11 +138,11 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main():
     db.init_db()
-    token = os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
-    if not token:
+    TOKEN = os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
+    if not TOKEN:
         logger.error("TOKEN env var missing")
         return
-    app = Application.builder().token(token).build()
+    app = Application.builder().TOKEN("TOKEN").build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callbacks))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
