@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import database as db
 import keyboards as kb
 import downloader as dl
+import translator as tr
 from messages import t
 
 logging.basicConfig(level=logging.INFO)
@@ -15,9 +16,9 @@ _user_state = {}
 _pending = {}
 
 def _lang(uid, context):
-    user = db.get_user(uid)
-    if user:
-        return user.get("language", "fa")
+    u = db.get_user(uid)
+    if u:
+        return u.get("language", "fa")
     return context.user_data.get("language", "fa") or "fa"
 
 def _set_guest_lang(context, lang):
@@ -28,11 +29,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.get_user(uid)
     if user:
         lang = user.get("language", "fa")
-        await update.message.reply_text(
-            t(user, "panel_welcome", user_name=user.get("name"), username=user.get("username"),
-              theme=user.get("theme"), language=user.get("language")),
-            reply_markup=kb.panel_reply(lang)
-        )
+        await update.message.reply_text(t(user, "panel_welcome", user_name=user.get("name"), username=user.get("username"), theme=user.get("theme"), language=user.get("language")), reply_markup=kb.panel_reply(lang))
         context.user_data["menu"] = "panel"
     else:
         lang = context.user_data.get("language", "fa")
@@ -47,7 +44,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.get_user(uid)
     lang = _lang(uid, context)
 
-    if txt in ["🔙 بازگشت", "🔙 Back"]:
+    # universal back (compare with translated BTN_BACK)
+    if txt == tr.btn(lang, "BTN_BACK"):
         if user:
             await update.message.reply_text(t(user, "panel_welcome", user_name=user.get("name"), username=user.get("username"), theme=user.get("theme"), language=user.get("language")), reply_markup=kb.panel_reply(lang))
             context.user_data["menu"] = "panel"
@@ -57,44 +55,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["menu"] = "start"
         return
 
-    # Guest buttons
-    if txt in ["📖 راهنما", "📖 Help"]:
+    # Guest buttons (compare translated labels)
+    if txt == tr.btn(lang, "BTN_HELP"):
         await update.message.reply_text(t({"language": lang}, "help_guest" if not user else "help_member"), reply_markup=kb.back_only(lang))
         return
-
-    if txt in ["📜 قوانین", "📜 Rules"]:
+    if txt == tr.btn(lang, "BTN_RULES"):
         await update.message.reply_text(t({"language": lang}, "rules"), reply_markup=kb.back_only(lang))
         return
-
-    if txt in ["ℹ درباره ما", "ℹ About"]:
+    if txt == tr.btn(lang, "BTN_ABOUT"):
         await update.message.reply_text(t({"language": lang}, "about"), reply_markup=kb.back_only(lang))
         return
-
-    if txt in ["⭐ قابلیت‌ها", "⭐ Features"]:
+    if txt == tr.btn(lang, "BTN_FEATURES"):
         await update.message.reply_text(t({"language": lang}, "features_text"), reply_markup=kb.back_only(lang))
         return
-
-    if txt in ["🌐 زبان", "🌐 Language"]:
+    if txt == tr.btn(lang, "BTN_LANGUAGE"):
         await update.message.reply_text(t({"language": lang}, "choose_language"), reply_markup=kb.language_inline())
         return
-
-    if txt in ["👤 ساخت حساب", "👤 Create Account"]:
+    if txt == tr.btn(lang, "BTN_CREATE"):
         _user_state[uid] = "reg_name"
         await update.message.reply_text(t({"language": lang}, "reg_name"))
         return
 
+    # registration flow
     if _user_state.get(uid) == "reg_name":
         _pending[uid] = {"name": txt}
         _user_state[uid] = "reg_username"
         await update.message.reply_text(t({"language": lang}, "reg_username"))
         return
-
     if _user_state.get(uid) == "reg_username":
         _pending[uid]["username"] = txt.lstrip("@")
         _user_state[uid] = "reg_password"
         await update.message.reply_text(t({"language": lang}, "reg_password"))
         return
-
     if _user_state.get(uid) == "reg_password":
         info = _pending.pop(uid, {})
         _user_state.pop(uid, None)
@@ -104,7 +96,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok = db.create_user(uid, name, username, password)
         if ok:
             user = db.get_user(uid)
-            # auto-login: show panel immediately
             await update.message.reply_text(t({"language": lang}, "reg_done"), reply_markup=kb.panel_reply(lang))
             await update.message.reply_text(t(user, "panel_welcome", user_name=user.get("name"), username=user.get("username"), theme=user.get("theme"), language=user.get("language")), reply_markup=kb.panel_reply(lang))
             context.user_data["menu"] = "panel"
@@ -112,40 +103,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(t({"language": lang}, "reg_fail"), reply_markup=kb.start_reply(lang))
         return
 
-    # Panel actions for logged users
+    # Panel buttons (user)
     if user:
-        if txt in ["📥 دانلود", "📥 Download"]:
+        if txt == tr.btn(lang, "BTN_DOWNLOAD"):
             await update.message.reply_text(t({"language": lang}, "send_link"), reply_markup=kb.panel_reply(lang))
             return
-        if txt in ["🎨 تنظیمات", "🎨 Settings"]:
+        if txt == tr.btn(lang, "BTN_SETTINGS"):
             await update.message.reply_text(t({"language": lang}, "settings"), reply_markup=kb.settings_reply(lang))
             return
-        if txt in ["📖 راهنمای پنل", "📖 Panel Help"]:
+        if txt == tr.btn(lang, "BTN_PANEL_HELP"):
             await update.message.reply_text(t({"language": lang}, "help_member"), reply_markup=kb.back_only(lang))
             return
 
-    if txt in ["🌐 تغییر زبان", "🌐 Change Language"]:
+    # settings shortcuts (reply keyboard entries)
+    if txt == tr.btn(lang, "BTN_LANGUAGE"):
         await update.message.reply_text(t({"language": lang}, "choose_language"), reply_markup=kb.language_inline())
         return
-
-    if txt in ["🎨 تغییر تم", "🎨 Theme"]:
+    if txt == tr.btn(lang, "BTN_SETTINGS"):
         await update.message.reply_text(t({"language": lang}, "choose_theme"), reply_markup=kb.theme_inline())
         return
 
     # URL handling
     if txt.startswith("http"):
         if not user:
+            # guest allowed only instagram & spotify
             if ("instagram" in txt) or ("instagr" in txt) or ("spotify" in txt):
                 guest_lang = context.user_data.get("language", "fa")
                 await dl.start_download_task(context.application, uid, txt, guest_lang)
-                await update.message.reply_text(t({"language": guest_lang}, "downloading"), reply_markup=kb.cancel_inline(guest_lang))
+                await update.message.reply_text(tr.t(guest_lang, "downloading"), reply_markup=kb.cancel_inline(guest_lang))
                 return
             else:
                 await update.message.reply_text(t({"language": _lang(uid, context)}, "guest_block_download"), reply_markup=kb.start_reply(_lang(uid, context)))
                 return
         else:
             await dl.start_download_task(context.application, uid, txt, _lang(uid, context))
-            await update.message.reply_text(t({"language": _lang(uid, context)}, "downloading"), reply_markup=kb.cancel_inline(_lang(uid, context)))
+            await update.message.reply_text(tr.t(_lang(uid, context), "downloading"), reply_markup=kb.cancel_inline(_lang(uid, context)))
             return
 
     await update.message.reply_text(t({"language": lang}, "unknown"), reply_markup=kb.start_reply(lang) if not user else kb.panel_reply(lang))
@@ -166,7 +158,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.set_language(uid, new)
         else:
             _set_guest_lang(context, new)
-        await q.edit_message_text(t({"language": new}, "lang_changed"))
+        # notify and re-show appropriate menu
+        await q.edit_message_text(tr.t(new, "lang_changed"))
         if user:
             await q.message.reply_text(t(user, "panel_welcome", user_name=user.get("name"), username=user.get("username"), theme=user.get("theme"), language=new), reply_markup=kb.panel_reply(new))
             context.user_data["menu"] = "panel"
@@ -181,12 +174,12 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.set_theme(uid, new)
         else:
             context.user_data["theme"] = new
-        await q.edit_message_text(t({"language": lang}, "theme_changed"))
+        await q.edit_message_text(tr.t(lang, "theme_changed"))
         return
 
     if data == "cancel_download":
         dl.cancel_download(uid)
-        await q.edit_message_text(t({"language": lang}, "cancel_download"))
+        await q.edit_message_text(tr.t(lang, "cancel_download"))
         return
 
 def main():
