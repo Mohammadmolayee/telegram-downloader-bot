@@ -1,90 +1,82 @@
 # database.py
 import sqlite3
-import threading
-from datetime import datetime
-import hashlib
+import re
 
 DB = "bot.db"
-_lock = threading.Lock()
-
-def _conn():
-    return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
-    with _lock:
-        c = _conn()
-        cur = c.cursor()
-        cur.execute("""CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            name TEXT,
-            username TEXT UNIQUE,
-            password_hash TEXT,
-            language TEXT DEFAULT 'fa',
-            theme TEXT DEFAULT 'light',
-            created_at TEXT
-        )""")
-        cur.execute("""CREATE TABLE IF NOT EXISTS downloads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            url TEXT,
-            title TEXT,
-            file_type TEXT,
-            created_at TEXT
-        )""")
-        c.commit()
-        c.close()
-
-def _hash(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
+    con = sqlite3.connect(DB)
+    cur = con.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        name TEXT,
+        username TEXT UNIQUE,
+        password TEXT,
+        language TEXT DEFAULT 'fa'
+    )
+    """)
+    con.commit()
+    con.close()
 
 def user_exists(user_id):
-    c = _conn()
-    cur = c.cursor()
+    con = sqlite3.connect(DB)
+    cur = con.cursor()
     cur.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,))
     ok = cur.fetchone() is not None
-    c.close()
+    con.close()
     return ok
 
 def create_user(user_id, name, username, password):
+    if not re.match(r"^[A-Za-zآ-ی]+$", name):
+        return False
+    
+    if not re.match(r"^[A-Za-z0-9_]+$", username):
+        return False
+    
+    if not re.match(r"^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]{6,}$", password):
+        return False
+    
     try:
-        c = _conn()
-        cur = c.cursor()
-        cur.execute("INSERT INTO users (user_id, name, username, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (user_id, name, username, _hash(password), datetime.utcnow().isoformat()))
-        c.commit()
-        c.close()
+        con = sqlite3.connect(DB)
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO users(user_id,name,username,password) VALUES(?,?,?,?)",
+            (user_id, name, username, password)
+        )
+        con.commit()
+        con.close()
         return True
-    except Exception:
+    except:
         return False
 
+def login(username, password):
+    con = sqlite3.connect(DB)
+    cur = con.cursor()
+    cur.execute("SELECT user_id FROM users WHERE username=? AND password=?", (username, password))
+    row = cur.fetchone()
+    con.close()
+    return row[0] if row else None
+
 def get_user(user_id):
-    c = _conn()
-    cur = c.cursor()
-    cur.execute("SELECT user_id, name, username, language, theme FROM users WHERE user_id=?", (user_id,))
-    r = cur.fetchone()
-    c.close()
-    if not r:
+    con = sqlite3.connect(DB)
+    cur = con.cursor()
+    cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    row = cur.fetchone()
+    con.close()
+    if not row:
         return None
-    return {"user_id": r[0], "name": r[1], "username": r[2], "language": r[3] or "fa", "theme": r[4] or "light"}
+    return {
+        "user_id": row[0],
+        "name": row[1],
+        "username": row[2],
+        "password": row[3],
+        "language": row[4]
+    }
 
 def set_language(user_id, lang):
-    c = _conn()
-    cur = c.cursor()
+    con = sqlite3.connect(DB)
+    cur = con.cursor()
     cur.execute("UPDATE users SET language=? WHERE user_id=?", (lang, user_id))
-    c.commit()
-    c.close()
-
-def set_theme(user_id, theme):
-    c = _conn()
-    cur = c.cursor()
-    cur.execute("UPDATE users SET theme=? WHERE user_id=?", (theme, user_id))
-    c.commit()
-    c.close()
-
-def save_download(user_id, url, title, file_type):
-    c = _conn()
-    cur = c.cursor()
-    cur.execute("INSERT INTO downloads (user_id, url, title, file_type, created_at) VALUES (?, ?, ?, ?, ?)",
-                (user_id, url, title, file_type, datetime.utcnow().isoformat()))
-    c.commit()
-    c.close()
+    con.commit()
+    con.close()
