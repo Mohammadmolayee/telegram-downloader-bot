@@ -1,69 +1,128 @@
 # downloader.py
 import os
+import shutil
 import asyncio
-import yt_dlp
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import yt_dlp
 from database import save_download, get_user
 from messages import t
 
-DOWNLOAD_FOLDER = "downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-download_tasks = {}   # { user_id: asyncio.Task }
-cancel_flags = {}      # { user_id: bool }
+# cancel flags
+_cancel_flags = {}
 
+def _has_ffmpeg():
+    return shutil.which("ffmpeg") is not None
 
-async def download_media(user_id, url, bot, lang):
-    """
-    دانلود با yt-dlp – کیفیت 360p ثابت – پشتیبانی از:
-    یوتیوب / اینستا / تیک‌تاک / اسپاتیفای / ساندکلود
-    """
-
-    cancel_flags[user_id] = False
-
-    msg = await bot.send_message(chat_id=user_id, text=t({"language": lang}, "downloading"))
-
-    ydl_opts = {
-        "format": "best[height<=360]",
-        "outtmpl": f"{DOWNLOAD_FOLDER}/%(id)s.%(ext)s",
-        "quiet": True,
-        "nocheckcertificate": True,
+def _build_opts(outtmpl):
+    # Prefer single-file mp4 if available to avoid needing ffmpeg merge.
+    opts = {
+        "format": "best[ext=mp4]/best",
+        "outtmpl": outtmpl,
         "noplaylist": True,
+        "nopart": True,
+        "quiet": True,
+        "no_warnings": True,
     }
+    # If ffmpeg present, allow merging if necessary
+    if _has_ffmpeg():
+        opts["merge_output_format"] = "mp4"
+    return opts
+
+def _blocking_download(url, outtmpl):
+    ydl_opts = _build_opts(outtmpl)
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+    return info
+
+async def download_and_send(user_id, url, bot, lang):
+    """
+    Downloads content in a thread and sends it via bot (works for audio/video/files).
+    """
+    # create a temporary outtmpl: downloads/{id}.%(ext)s
+    outtmpl = os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s")
+    loop = asyncio.get_running_loop()
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+        # run blocking download in thread
+        info = await asyncio.to_thread(_blocking_download, url, outtmpl)
+    except Exception as e:
+        # send error message
+        try:
+            await bot.send_message(chat_id=user_id, text=t({"language": lang}, "download_error"))
+        except Exception:
+            pass
+        return
 
-        file_id = info.get("id")
-        title = info.get("title", "video")
-        ext = info.get("ext", "mp4")
-        file_path = f"{DOWNLOAD_FOLDER}/{file_id}.{ext}"
+    # if user canceled
+    if _cancel_flags.get(user_id):
+        _cancel_flags.pop(user_id, None)
+        try:
+            await bot.send_message(chat_id=user_id, text=t({"language": lang}, "cancel_download"))
+        except Exception:
+            pass
+        return
 
-        # اگر کاربر لغو کرده
-        if cancel_flags.get(user_id):
-            await msg.edit_text(t({"language": lang}, "cancel_download"))
-            if os.path.exists(file_path):
-                os.remove(file_path)
+    # find file
+    file_id = info.get("id")
+    ext = info.get("ext") or "mp4"
+    title = info.get("title") or "file"
+    file_path = os.path.join(DOWNLOAD_DIR, f"{file_id}.{ext}")
+    if not os.path.exists(file_path):
+        # try to search
+        candidates = [f for f in os.listdir(DOWNLOAD_DIR) if f.startswith(file_id)]
+        if candidates:
+            file_path = os.path.join(DOWNLOAD_DIR, candidates[0])
+        else:
+            await bot.send_message(chat_id=user_id, text=t({"language": lang}, "download_error"))
             return
 
-        # ارسال فایل
-        if ext in ["mp3", "m4a"]:
+    # send file (choose audio if audio-only)
+    try:
+        # get mimetype from ext heuristics
+        audio_exts = {"mp3", "m4a", "aac", "opus", "wav"}
+        if ext in audio_exts or info.get("acodec") and not info.get("vcodec"):
             await bot.send_audio(chat_id=user_id, audio=open(file_path, "rb"), caption=title)
+            ftype = "audio"
         else:
+            # use send_video for typical mp4
             await bot.send_video(chat_id=user_id, video=open(file_path, "rb"), caption=title)
+            ftype = "video"
+    except Exception:
+        # fallback: send as document
+        try:
+            await bot.send_document(chat_id=user_id, document=open(file_path, "rb"), caption=title)
+            ftype = "document"
+        except Exception:
+            await bot.send_message(chat_id=user_id, text=t({"language": lang}, "download_error"))
+            return
+    finally:
+        # remove file
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
 
-        await msg.delete()
+    # save record
+    save_download(user_id, url, title, ftype)
 
-        # ذخیره در دیتابیس
-        save_download(user_id, url, title)
 
-        os.remove(file_path)
-
-    except Exception as e:
-        await msg.edit_text(t({"language": lang}, "download_error"))
-
+# exposed API
+async def start_download_task(application, user_id, url, lang):
+    """
+    Schedules a background download task that uses application.bot
+    """
+    # schedule via application.create_task or asyncio.create_task
+    # wrapper to call download_and_send with bot
+    bot = application.bot
+    async def _job():
+        await bot.send_message(chat_id=user_id, text=t({"language": lang}, "downloading"))
+        await download_and_send(user_id, url, bot, lang)
+    task = application.create_task(_job())
+    return task
 
 def cancel_download(user_id):
-    if user_id in cancel_flags:
-        cancel_flags[user_id] = True
+    _cancel_flags[user_id] = True
