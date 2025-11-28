@@ -62,7 +62,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     init_db()
 
-    app = Application.builder().token("YOUR_BOT_TOKEN").build()
+    app = Application.builder().token("TOKEN").build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT, handle_msg))
