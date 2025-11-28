@@ -57,14 +57,6 @@ def create_user(user_id, name, username, password):
     except Exception:
         return False
 
-def login(username, password):
-    c = _conn()
-    cur = c.cursor()
-    cur.execute("SELECT user_id FROM users WHERE username=? AND password_hash=?", (username, _hash(password)))
-    r = cur.fetchone()
-    c.close()
-    return r[0] if r else None
-
 def get_user(user_id):
     c = _conn()
     cur = c.cursor()
@@ -96,12 +88,3 @@ def save_download(user_id, url, title, file_type):
                 (user_id, url, title, file_type, datetime.utcnow().isoformat()))
     c.commit()
     c.close()
-
-def recent_downloads(user_id, limit=10):
-    c = _conn()
-    cur = c.cursor()
-    cur.execute("SELECT title, url, file_type, created_at FROM downloads WHERE user_id=? ORDER BY id DESC LIMIT ?",
-                (user_id, limit))
-    rows = cur.fetchall()
-    c.close()
-    return rows
