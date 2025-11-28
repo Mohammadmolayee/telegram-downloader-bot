@@ -1,148 +1,167 @@
 # messages.py
+# متن‌ها (فارسی + انگلیسی) — دقیقاً همان متنی که تایید کردی
 
-MESSAGES = {
+texts = {
     "fa": {
-        "start": "👋 سلام! به ربات «دانلودر حرفه‌ای» خوش اومدی!\n\n"
-                 "📥 لینک بده، دانلود خودکار انجام میشه.\n"
-                 "✨ بدون حساب → دانلود Instagram + Spotify\n"
-                 "🔓 با حساب → دانلود YouTube + TikTok + SoundCloud + امکانات کامل",
-
-        "help_guest": "📖 راهنمای مهمان\n\n"
-                      "📌 برای ساخت حساب مراحل زیر را انجام دهید:\n"
-                      "1️⃣ دکمه «ساخت حساب» را بزنید\n"
-                      "2️⃣ نام کامل را ارسال کنید\n"
-                      "3️⃣ نام کاربری انتخاب کنید\n"
-                      "4️⃣ رمز عبور تعیین کنید\n\n"
-                      "🎬 بدون حساب فقط می‌تونی از اینستا و اسپاتی‌فای دانلود کنی.",
-
-        "help_member": "📖 راهنمای پنل کاربری\n\n"
-                       "در این پنل شما می‌تونید:\n"
-                       "• دانلود ویدیو/صوت از تمام پلتفرم‌ها\n"
-                       "• مشاهده دانلودهای اخیر\n"
-                       "• تغییر زبان\n"
-                       "• تغییر تم (تیره/روشن)\n",
-
-        "rules": "📜 قوانین ربات:\n\n"
-                 "• ارسال لینک غیرمجاز ممنوع\n"
-                 "• رعایت قوانین کپی‌رایت بر عهده کاربر است\n"
-                 "• استفاده قانونی از محتوا توصیه می‌شود",
-
-        "about": "ℹ درباره ما\n\n"
-                 "این ربات توسط محمد ساخته شده.\n"
-                 "برای ارتباط: @Mohammad778889",
-
-        "enter_name": "👤 نام کامل را ارسال کنید:",
-        "enter_username": "🆔 نام کاربری انتخاب کن:",
-        "enter_password": "🔐 رمز عبور تعیین کن:",
-        "account_created": "🎉 حساب ساخته شد! حالا با دکمه «ورود» وارد شو.",
-        "login_ok": "✅ ورود موفق! خوش اومدی ✨",
-        "login_fail": "❌ یوزرنیم یا رمز اشتباهه.",
-
-        "theme_changed": "🎨 تم با موفقیت تغییر کرد!",
-        "language_changed": "🌐 زبان تغییر کرد.",
-
-        "send_link": "📥 لینک معتبر ارسال کنید.",
+        "start_guest": (
+            "👋 سلام! به ربات دانلودر حرفه‌ای خوش اومدی!\n\n"
+            "📥 قابلیت‌های حالت مهمان:\n"
+            "• دانلود از اینستاگرام\n"
+            "• دانلود از اسپاتیفای\n\n"
+            "⚠️ برای دانلود از یوتیوب، تیک‌تاک و ساندکلاد باید حساب بسازی.\n\n"
+            "💡 فقط لینک رو بفرست — دانلود خودکار شروع میشه."
+        ),
+        "help_guest": (
+            "📖 راهنمای حالت مهمان:\n\n"
+            "1️⃣ فقط از اینستاگرام و اسپاتیفای می‌تونی دانلود کنی.\n"
+            "2️⃣ برای فعال شدن یوتیوب و تیک‌تاک باید حساب بسازی.\n"
+            "3️⃣ لینک رو بفرست → بلافاصله دانلود شروع میشه."
+        ),
+        "help_member": (
+            "📖 راهنمای پنل کاربری:\n\n"
+            "در این بخش می‌تونی:\n"
+            "• از تمام پلتفرم‌ها (یوتیوب، تیک‌تاک، اینستا، اسپاتیفای، ساندکلاد) دانلود کنی.\n"
+            "• تم و زبان ربات رو تغییر بدی.\n"
+            "• سابقه‌ی دانلودها رو ببینی.\n"
+            "• از پشتیبانی کمک بگیری."
+        ),
+        "rules": (
+            "📜 قوانین استفاده:\n\n"
+            "1️⃣ از ربات فقط برای استفاده‌ی شخصی استفاده کن.\n"
+            "2️⃣ لینک‌های غیرقانونی یا محتوای حساس مجاز نیست.\n"
+            "3️⃣ نقض قوانین ممکنه باعث مسدود شدن حساب بشه."
+        ),
+        "about": (
+            "ℹ درباره‌ی ما:\n\n"
+            "این ربات توسط محمد ساخته شده ❤️\n"
+            "هدف: ساده‌سازی دانلود از پلتفرم‌های مختلف.\n\n"
+            "📬 ارتباط با پشتیبانی:\n"
+            "@Mohammad778889"
+        ),
+        "reg_name": "👤 لطفاً نام خودت رو وارد کن:",
+        "reg_username": "🔖 حالا یک نام کاربری انتخاب کن:",
+        "reg_password": "🔒 لطفاً یک رمز عبور انتخاب کن:",
+        "reg_done": "✅ حساب با موفقیت ساخته شد! حالا وارد پنل کاربری شدی.",
+        "reg_fail": "❌ خطا در ساخت حساب. لطفاً دوباره تلاش کن.",
+        "login_success": "✅ وارد حساب شدی!",
+        "login_fail": "❌ ورود ناموفق. لطفاً اطلاعات رو چک کن.",
+        "guest_download": "📎 لینک شناسایی شد. دانلود در حالت مهمان آغاز شد...",
+        "guest_download_block": "⚠️ برای دانلود در این بخش باید به استارت یا پنل مراجعه کنید.",
+        "choose_language": "🌐 زبان مورد نظر رو انتخاب کن:",
+        "choose_theme": "🎨 تم مورد نظر رو انتخاب کن:",
+        "lang_changed": "✅ زبان با موفقیت تغییر کرد.",
+        "theme_changed": "✅ تم با موفقیت تغییر کرد.",
+        "settings": "⚙ تنظیمات ربات:",
         "downloading": "⏳ در حال دانلود...",
         "download_error": "❌ خطا در دانلود!",
         "cancel_download": "🚫 دانلود لغو شد.",
+        "unknown": "🤔 دستور ناشناخته است. لطفاً یکی از دکمه‌ها رو انتخاب کن.",
+        "back": "🔙 بازگشت",
+        "panel_welcome": (
+            "🎉 خوش اومدی به پنل کاربری!\n\n"
+            "🧑‍💼 کاربر: {user_name}\n"
+            "🆔 یوزرنیم: @{username}\n"
+            "🎨 تم فعلی: {theme}\n"
+            "🌐 زبان فعلی: {language}\n\n"
+            "📥 قابلیت‌های فعال:\n"
+            "• Instagram\n"
+            "• YouTube\n"
+            "• TikTok\n"
+            "• SoundCloud\n"
+            "• Spotify\n\n"
+            "اینجا می‌تونی دانلودها رو مدیریت کنی، تنظیمات رو تغییر بدی یا سابقه دانلود رو ببینی."
+        )
     },
-
-    # ---------------- ENGLISH ----------------
     "en": {
-        "start": "👋 Welcome to the *Professional Downloader Bot*!\n\n"
-                 "📥 Send a link — download starts automatically.\n"
-                 "✨ Guest → Instagram + Spotify\n"
-                 "🔓 Member → YouTube + TikTok + SoundCloud + Full features",
-
-        "help_guest": "📖 Guest Help\n\n"
-                      "To create an account:\n"
-                      "1️⃣ Press 'Create Account'\n"
-                      "2️⃣ Enter your full name\n"
-                      "3️⃣ Choose a username\n"
-                      "4️⃣ Set a password\n\n"
-                      "🎬 Guests can only download Instagram & Spotify.",
-
-        "help_member": "📖 Member Panel Guide\n\n"
-                       "You can:\n"
-                       "• Download from all platforms\n"
-                       "• View recent downloads\n"
-                       "• Change language\n"
-                       "• Switch theme (light/dark)\n",
-
-        "rules": "📜 Rules:\n\n"
-                 "• No illegal or harmful links\n"
-                 "• Copyright responsibility is yours\n"
-                 "• Use content legally",
-
-        "about": "ℹ About Us\n\n"
-                 "Bot created by Mohammad.\n"
-                 "Contact: @Mohammad778889",
-
-        "enter_name": "👤 Send your full name:",
-        "enter_username": "🆔 Choose a username:",
-        "enter_password": "🔐 Set a password:",
-        "account_created": "🎉 Account created! Now login.",
-        "login_ok": "✅ Login successful!",
-        "login_fail": "❌ Wrong username or password.",
-
-        "theme_changed": "🎨 Theme changed!",
-        "language_changed": "🌐 Language updated.",
-
-        "send_link": "📥 Send a valid link.",
+        "start_guest": (
+            "👋 Welcome to the Professional Downloader Bot!\n\n"
+            "📥 Guest mode features:\n"
+            "• Download from Instagram\n"
+            "• Download from Spotify\n\n"
+            "⚠ To download from YouTube, TikTok, and SoundCloud, please create an account.\n\n"
+            "💡 Just send a link — the download starts automatically."
+        ),
+        "help_guest": (
+            "📖 Guest Mode Guide:\n\n"
+            "1️⃣ You can only download from Instagram and Spotify.\n"
+            "2️⃣ To activate YouTube and TikTok, create an account.\n"
+            "3️⃣ Send the link → the download starts instantly."
+        ),
+        "help_member": (
+            "📖 User Panel Guide:\n\n"
+            "You can:\n"
+            "• Download from all platforms (YouTube, TikTok, Instagram, Spotify, SoundCloud).\n"
+            "• Change theme and language.\n"
+            "• View download history.\n"
+            "• Contact support."
+        ),
+        "rules": (
+            "📜 Terms of Use:\n\n"
+            "1️⃣ Use this bot for personal purposes only.\n"
+            "2️⃣ Illegal or sensitive links are not allowed.\n"
+            "3️⃣ Violation may result in account suspension."
+        ),
+        "about": (
+            "ℹ About Us:\n\n"
+            "This bot was created by Mohammad ❤️\n"
+            "Goal: Make media downloads easy and fast.\n\n"
+            "📬 Contact Support:\n"
+            "@Mohammad778889"
+        ),
+        "reg_name": "👤 Please enter your name:",
+        "reg_username": "🔖 Now choose a username:",
+        "reg_password": "🔒 Please set a password:",
+        "reg_done": "✅ Account created successfully!",
+        "reg_fail": "❌ Error creating account. Try again.",
+        "login_success": "✅ You are now logged in!",
+        "login_fail": "❌ Login failed. Please check your info.",
+        "guest_download": "📎 Link detected. Download started in guest mode...",
+        "guest_download_block": "⚠ To download here please use start or panel.",
+        "choose_language": "🌐 Choose your language:",
+        "choose_theme": "🎨 Choose your theme:",
+        "lang_changed": "✅ Language changed successfully.",
+        "theme_changed": "✅ Theme changed successfully.",
+        "settings": "⚙ Bot Settings:",
         "downloading": "⏳ Downloading...",
         "download_error": "❌ Download failed!",
         "cancel_download": "🚫 Download cancelled.",
-    },
-
-    # ---------------- ARABIC ----------------
-    "ar": {
-        "start": "👋 أهلاً بك في *بوت التحميل الاحترافي*!\n\n"
-                 "📥 أرسل الرابط — وسيبدأ التحميل تلقائياً.\n"
-                 "✨ الضيف → Instagram + Spotify\n"
-                 "🔓 العضو → YouTube + TikTok + SoundCloud + جميع الميزات",
-
-        "help_guest": "📖 دليل الضيف\n\n"
-                      "لإنشاء حساب:\n"
-                      "1️⃣ اضغط «إنشاء حساب»\n"
-                      "2️⃣ أرسل اسمك الكامل\n"
-                      "3️⃣ اختر اسم مستخدم\n"
-                      "4️⃣ ضع كلمة مرور\n\n"
-                      "🎬 الضيف يستطيع التحميل من إنستغرام وسبوتيفاي فقط.",
-
-        "help_member": "📖 دليل لوحة العضو\n\n"
-                       "يمكنك:\n"
-                       "• التحميل من جميع المنصات\n"
-                       "• عرض التحميلات الأخيرة\n"
-                       "• تغيير اللغة\n"
-                       "• تغيير المظهر (فاتح/داكن)\n",
-
-        "rules": "📜 القوانين:\n\n"
-                 "• يمنع إرسال الروابط غير القانونية\n"
-                 "• مسؤولية حقوق النشر تقع عليك\n"
-                 "• يُفضل استخدام المحتوى بشكل قانوني",
-
-        "about": "ℹ معلومات عنا\n\n"
-                 "البوت تم تطويره بواسطة محمد.\n"
-                 "للتواصل: @Mohammad778889",
-
-        "enter_name": "👤 أرسل اسمك الكامل:",
-        "enter_username": "🆔 اختر اسم مستخدم:",
-        "enter_password": "🔐 ضع كلمة مرور:",
-        "account_created": "🎉 تم إنشاء الحساب! قم بتسجيل الدخول الآن.",
-        "login_ok": "✅ تم تسجيل الدخول!",
-        "login_fail": "❌ اسم المستخدم أو كلمة المرور خاطئة.",
-
-        "theme_changed": "🎨 تم تغيير السمة!",
-        "language_changed": "🌐 تم تغيير اللغة.",
-
-        "send_link": "📥 أرسل رابطاً صالحاً.",
-        "downloading": "⏳ جارِ التحميل...",
-        "download_error": "❌ فشل التحميل!",
-        "cancel_download": "🚫 تم إلغاء التحميل.",
+        "unknown": "🤔 Unknown command. Please use the buttons.",
+        "back": "🔙 Back",
+        "panel_welcome": (
+            "🎉 Welcome to your panel!\n\n"
+            "🧑‍💼 User: {user_name}\n"
+            "🆔 Username: @{username}\n"
+            "🎨 Theme: {theme}\n"
+            "🌐 Language: {language}\n\n"
+            "📥 Enabled features:\n"
+            "• Instagram\n"
+            "• YouTube\n"
+            "• TikTok\n"
+            "• SoundCloud\n"
+            "• Spotify\n\n"
+            "Manage downloads, change settings, or view history here."
+        )
     }
 }
 
 
-def t(user, key):
-    lang = user.get("language", "fa")
-    return MESSAGES[lang].get(key, "...")
+def t(user_like, key, **fmt):
+    """
+    user_like: either {'language': 'fa'} or a user-dict { 'language': 'fa', ... }
+    key: message key
+    fmt: format fields for panel_welcome
+    """
+    lang = "fa"
+    if isinstance(user_like, dict):
+        lang = user_like.get("language", "fa")
+    elif isinstance(user_like, str):
+        lang = user_like
+    else:
+        lang = "fa"
+    template = texts.get(lang, texts["fa"]).get(key, "...")
+    if fmt:
+        try:
+            return template.format(**fmt)
+        except Exception:
+            return template
+    return template
