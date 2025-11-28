@@ -1,28 +1,25 @@
-# downloader.py
-import yt_dlp
 import os
-import uuid
+import yt_dlp
+import requests
 
-async def download_media(url, bot, chat_id, lang):
-    uid = str(uuid.uuid4())[:6]
-    filename = f"dl_{uid}.mp4"
-
-    ydl_opts = {
-        "outtmpl": filename,
-        "format": "mp4/bestaudio/best",
-        "quiet": True
-    }
+async def download_media(url, update, lang):
+    msg = await update.message.reply_text("⏳ در حال دانلود..." if lang=="fa" else "⏳ Downloading...")
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as y:
-            y.download([url])
+        ydl_opts = {
+            "outtmpl": "file.%(ext)s",
+            "format": "best"
+        }
 
-        await bot.send_video(
-            chat_id=chat_id,
-            video=open(filename, "rb"),
-            caption=f"✅ دانلود انجام شد!\n\n📥 Via @professional_dawnloder_bot"
-        )
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-        os.remove(filename)
-    except:
-        await bot.send_message(chat_id, "❌ خطا در دانلود")
+        for f in os.listdir():
+            if f.startswith("file."):
+                await update.message.reply_document(open(f, "rb"))
+                os.remove(f)
+
+        await msg.edit_text("✔ دانلود انجام شد" if lang=="fa" else "✔ Done")
+
+    except Exception as e:
+        await msg.edit_text("❌ خطا در دانلود" if lang=="fa" else "❌ Error")
