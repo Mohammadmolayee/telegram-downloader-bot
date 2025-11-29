@@ -1,36 +1,40 @@
-TEXTS = {
+from translator import translate_if_needed
+
+BASE = {
     "start_guest": {
-        "fa": "👋 سلام! به ربات دانلودر حرفه‌ای خوش اومدی!\n\n📥 قابلیت‌های حالت مهمان:\n• دانلود اینستاگرام\n• دانلود اسپاتیفای\n\n⚠️ برای دانلود یوتیوب، تیک‌تاک و ساندکلاد باید حساب بسازی.\n\n💡 فقط لینک رو بفرست — دانلود خودکار شروع میشه",
-        "en": "👋 Welcome to the professional downloader bot!\n\n📥 Guest features:\n• Instagram download\n• Spotify download\n\n⚠️ You need an account for YouTube, TikTok, and SoundCloud downloads.\n\n💡 Just send a link — download starts automatically.",
-        "ar": "👋 أهلاً بك في روبوت التحميل الاحترافي!\n\n📥 ميزات الضيف:\n• تحميل إنستغرام\n• تحميل سبوتيفاي\n\n⚠️ يلزمك حساب لتحميل يوتيوب وتيك توك وساوند كلاود.\n\n💡 فقط أرسل الرابط — يبدأ التحميل تلقائياً."
+        "fa": "👋 سلام! به ربات «دانلودر حرفه‌ای» خوش اومدی!\n\n📥 قابلیت‌های حالت مهمان:\n• دانلود اینستاگرام\n• دانلود اسپاتیفای\n\n⚠️ برای دانلود یوتیوب، تیک‌تاک و ساندکلاد باید حساب بسازی.\n\n💡 فقط لینک رو بفرست — دانلود خودکار شروع میشه",
     },
-
     "start_member": {
-        "fa": "🎉 خوش اومدی! این پنل کاربری توست.",
-        "en": "🎉 Welcome! This is your dashboard.",
-        "ar": "🎉 مرحباً! هذه هي لوحة حسابك."
+        "fa": "🎉 خوش اومدی {name}! این پنل کاربریته. برای دانلود، فقط لینک رو بفرست.",
     },
-
-    "account_created": {
-        "fa": "✔ حساب با موفقیت ساخته شد.",
-        "en": "✔ Account created successfully.",
-        "ar": "✔ تم إنشاء الحساب بنجاح."
+    "help_guest": {
+        "fa": "📖 راهنمای حالت مهمان:\n1– فقط از اینستاگرام و اسپاتیفای می‌تونی دانلود کنی.\n2– برای یوتیوب، تیک‌تاک و ساندکلاد حساب بساز.\n3– لینک بفرست → دانلود خودکار شروع میشه.",
     },
-
-    "choose_lang": {
-        "fa": "🌐 لطفا زبان را انتخاب کنید:",
-        "en": "🌐 Choose your language:",
-        "ar": "🌐 اختر لغتك:"
+    "help_member": {
+        "fa": "📖 راهنمای پنل عضو:\nشما می‌تونید از این سرویس‌ها دانلود کنید: اینستاگرام، یوتیوب، تیک‌تاک، ساندکلاد، اسپاتیفای. لینک بفرستید.",
     },
-
-    "lang_changed": {
-        "fa": "🌐 زبان با موفقیت تغییر کرد.",
-        "en": "🌐 Language updated successfully.",
-        "ar": "🌐 تم تغيير اللغة بنجاح."
-    }
+    "reg_name": {"fa": "۱) نام و نام خانوادگی را بفرست:"},
+    "reg_username": {"fa": "۲) یوزرنیم (بدون @) را بفرست:"},
+    "reg_password": {"fa": "۳) پسورد (۸-۱۲ کاراکتر، حروف و عدد) را بفرست:"},
+    "reg_done": {"fa": "✅ حساب ساخته شد! برای ورود، دکمه ورود رو بزن (auto-login فعال است)."},
+    "reg_fail": {"fa": "❌ خطا: یوزرنیم تکراری یا نامعتبر. دوباره تلاش کن."},
+    "choose_language": {"fa": "🌐 زبان را انتخاب کنید:"},
+    "lang_changed": {"fa": "✅ زبان با موفقیت تغییر کرد."},
+    "choose_theme": {"fa": "🎨 تم را انتخاب کنید:"},
+    "theme_changed": {"fa": "✅ تم تغییر کرد."},
+    "downloading": {"fa": "⏳ در حال دانلود... (برای لغو /cancel)"},
+    "download_done": {"fa": "✔ دانلود کامل شد — فایل را دریافت کن."},
+    "download_error": {"fa": "❌ خطا در دانلود. ممکن است لینک پشتیبانی نشود."},
+    "guest_block_download": {"fa": "⚠️ در این بخش دانلود فقط از پنل مهمان/عضو پشتیبانی می‌شود. لطفا /start را بزنید."},
+    "unknown": {"fa": "متن یا دستور ناشناخته — از منو استفاده کن."},
+    "about": {"fa": "ℹ ربات «دانلودر حرفه‌ای» ساخته‌ی @Mohammad778889 است. پشتیبانی: @Mohammad778889"},
+    "rules": {"fa": "📜 قوانین: لطفا محتوای دارای کپی‌رایت را بدون اجازه منتشر نکنید."},
 }
 
-def t(key, lang):
-    if key not in TEXTS:
-        return "..."
-    return TEXTS[key].get(lang, TEXTS[key]["fa"])
+def get_text(key, lang="fa", **kwargs):
+    base = BASE.get(key, {})
+    text_fa = base.get("fa", "")
+    if lang == "fa":
+        return text_fa.format(**kwargs)
+    # otherwise translate
+    return translate_if_needed(text_fa, "fa", lang).format(**kwargs)
