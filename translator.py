@@ -1,14 +1,11 @@
-# translator.py
-from deep_translator import GoogleTranslator
+from googletrans import Translator
+_tr = Translator()
 
-def tr(text: str, lang: str):
-    """
-    ترجمه خودکار متن از فارسی به زبان انتخابی کاربر
-    """
-    if lang == "fa":
+def translate_if_needed(text, src, dest):
+    if src == dest:
         return text
-    
     try:
-        return GoogleTranslator(source="auto", target=lang).translate(text)
-    except:
-        return text  # درصورت خطا متن فارسی نمایش می‌دهد
+        res = _tr.translate(text, src=src, dest=dest)
+        return res.text
+    except Exception:
+        return text  # fallback to fa
