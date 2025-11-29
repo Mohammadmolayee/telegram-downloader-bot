@@ -1,23 +1,21 @@
 FROM python:3.11-slim
 
-# نصب FFmpeg + وابستگی‌های yt-dlp
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ffmpeg wget curl && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# install ffmpeg and essentials
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg wget curl build-essential \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# پوشه کاری
 WORKDIR /app
-
-# نصب نیازمندی‌ها
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# کپی پروژه
+# copy project
 COPY . /app
 
-# آپدیت اتومات yt-dlp
-RUN yt-dlp -U
+# create temp folders
+RUN mkdir -p /app/temp
 
-# اجرای ربات
+ENV BOT_TOKEN=TOKEN_HERE
+
+# run
 CMD ["python", "bot.py"]
