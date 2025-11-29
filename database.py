@@ -1,3 +1,4 @@
+# database.py
 import sqlite3
 from datetime import datetime
 
@@ -83,3 +84,20 @@ def set_download_status(dl_id, status, file_name=None):
     else:
         cur.execute("UPDATE downloads SET status=? WHERE id=?", (status, dl_id))
     c.commit(); c.close()
+
+def get_last_downloads(user_id, limit=5):
+    c = _conn(); cur = c.cursor()
+    cur.execute("SELECT platform,file_name,created_at FROM downloads WHERE user_id=? ORDER BY created_at DESC LIMIT ?", (user_id, limit))
+    rows = cur.fetchall(); c.close()
+    return rows
+
+def get_stats(user_id):
+    c = _conn(); cur = c.cursor()
+    c.execute("SELECT COUNT(*) FROM downloads WHERE user_id=?", (user_id,))
+    total = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM downloads WHERE user_id=? AND platform LIKE 'youtube%'", (user_id,))
+    video = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM downloads WHERE user_id=? AND platform LIKE 'spotify%'", (user_id,))
+    audio = c.fetchone()[0]
+    c.close()
+    return {"total": total, "video": video, "audio": audio}
