@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # install ffmpeg and essentials
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg wget curl build-essential \
+    ffmpeg wget curl build-essential git \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,5 +17,4 @@ RUN mkdir -p /app/temp
 
 ENV BOT_TOKEN=TOKEN_HERE
 
-# run
 CMD ["python", "bot.py"]
