@@ -1,13 +1,20 @@
+# translator.py
 from deep_translator import GoogleTranslator
 from functools import lru_cache
 
-@lru_cache(maxsize=512)
+@lru_cache(maxsize=1024)
 def translate_text(text: str, target: str):
+    """
+    Translate `text` (assumed Persian or auto-detected) into target lang 'fa'/'en'/'ar'.
+    If target == 'fa' returns original text.
+    """
+    if not text:
+        return text
+    if target == "fa":
+        return text
     try:
-        if target == "fa":
-            return text
-        # source is fa by design
-        translated = GoogleTranslator(source='auto', target=target).translate(text)
-        return translated
+        # deep_translator GoogleTranslator may auto-detect source
+        return GoogleTranslator(source='auto', target=target).translate(text)
     except Exception:
-        return text  # fallback to fa
+        # fallback: return original
+        return text
