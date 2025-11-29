@@ -1,58 +1,41 @@
-from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+# keyboards.py
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+from messages import BUTTONS
 from translator import translate_text
 
-# callback_data constants (fixed)
-CB_HELP = "help"
-CB_RULES = "rules"
-CB_ABOUT = "about"
-CB_LANG = "lang"
-CB_CREATE = "create"
-CB_PANEL = "panel"
-CB_THEME = "theme"
-CB_BACK = "back"
-CB_CANCEL = "cancel"
-
-def make_start_inline(lang="fa"):
-    # texts in Farsi -> will be translated per lang
-    labels = [
-        ("📖 راهنما", CB_HELP),
-        ("📜 قوانین", CB_RULES),
-        ("ℹ درباره ما", CB_ABOUT),
-        ("🌐 زبان", CB_LANG),
-        ("👤 ساخت حساب", CB_CREATE)
+# reply keyboards (two-row layouts etc.)
+def guest_keyboard(lang="fa"):
+    order = [
+        [BUTTONS["help"], BUTTONS["rules"]],
+        [BUTTONS["about"], BUTTONS["features"]],
+        [BUTTONS["language"], BUTTONS["create"]]
     ]
-    return _inline_from_labels(labels, lang)
+    return _make_reply(order, lang)
 
-def make_panel_inline(lang="fa"):
-    labels = [
-        ("📖 راهنما", CB_HELP),
-        ("📜 قوانین", CB_RULES),
-        ("ℹ درباره ما", CB_ABOUT),
-        ("🌐 زبان", CB_LANG),
-        ("🔙 بازگشت", CB_BACK)
+def member_keyboard(lang="fa"):
+    order = [
+        [BUTTONS["stats"], BUTTONS["features"]],
+        [BUTTONS["help"], BUTTONS["rules"]],
+        [BUTTONS["about"], BUTTONS["language"]],
+        [BUTTONS["settings"]]
     ]
-    return _inline_from_labels(labels, lang)
+    return _make_reply(order, lang)
 
-def make_language_inline():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇮🇷 فارسی", callback_data="lang_fa"),
-         InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
-         InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")]
-    ])
+def back_keyboard(lang="fa"):
+    lab = translate_text(BUTTONS["back"], lang) if lang != "fa" else BUTTONS["back"]
+    return ReplyKeyboardMarkup([[lab]], resize_keyboard=True, one_time_keyboard=True)
 
-def make_cancel_inline(user_id):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("✖️ لغو دانلود", callback_data=f"cancel_{user_id}")]])
+def cancel_keyboard(lang="fa"):
+    lab = translate_text(BUTTONS["cancel"], lang) if lang != "fa" else BUTTONS["cancel"]
+    return ReplyKeyboardMarkup([[lab]], resize_keyboard=True, one_time_keyboard=True)
 
-# helper
-def _inline_from_labels(labels, lang):
-    # returns InlineKeyboardMarkup in two-column layout
-    rows = []
-    cur = []
-    for text, cb in labels:
-        lab = translate_text(text, lang) if lang != "fa" else text
-        cur.append(InlineKeyboardButton(lab, callback_data=cb))
-        if len(cur) == 2:
-            rows.append(cur); cur = []
-    if cur:
-        rows.append(cur)
-    return InlineKeyboardMarkup(rows)
+def _make_reply(layout, lang):
+    # translate labels per lang
+    kb = []
+    for row in layout:
+        r = []
+        for label in row:
+            rlabel = translate_text(label, lang) if lang != "fa" else label
+            r.append(rlabel)
+        kb.append(r)
+    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
