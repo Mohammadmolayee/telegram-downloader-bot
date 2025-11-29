@@ -1,80 +1,80 @@
 import sqlite3
+from datetime import datetime
 
-DB = "users.db"
+DB = "bot_data.db"
 
-def connect():
-    return sqlite3.connect(DB)
+def conn():
+    return sqlite3.connect(DB, timeout=30)
 
 def init_db():
-    con = connect()
-    cur = con.cursor()
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users(
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS users(
         user_id INTEGER PRIMARY KEY,
         name TEXT,
-        username TEXT,
+        username TEXT UNIQUE,
         password TEXT,
-        language TEXT DEFAULT 'fa'
-    )
-    """)
-    con.commit()
-    con.close()
+        language TEXT DEFAULT 'fa',
+        theme TEXT DEFAULT 'light',
+        created_at TEXT
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS downloads(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        url TEXT,
+        platform TEXT,
+        file_name TEXT,
+        status TEXT,
+        created_at TEXT
+    )""")
+    c.commit(); c.close()
 
-def user_exists(user_id):
-    con = connect()
-    cur = con.cursor()
-    cur.execute("SELECT user_id FROM users WHERE user_id=?", (user_id,))
-    data = cur.fetchone()
-    con.close()
-    return bool(data)
+# user helpers
+def user_exists(uid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT 1 FROM users WHERE user_id=?", (uid,))
+    r = cur.fetchone(); c.close()
+    return bool(r)
 
-def create_user(user_id, name, username, password):
-    con = connect()
-    cur = con.cursor()
-
+def create_user(uid, name, username, password):
     try:
-        cur.execute("""
-            INSERT INTO users(user_id, name, username, password)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, name, username, password))
-        con.commit()
-        return True
-    except:
+        c = conn(); cur = c.cursor()
+        cur.execute("INSERT INTO users(user_id,name,username,password,created_at) VALUES (?,?,?,?,?)",
+                    (uid, name, username, password, datetime.utcnow().isoformat()))
+        c.commit(); c.close(); return True
+    except Exception:
         return False
-    finally:
-        con.close()
-
-def login(username, password):
-    con = connect()
-    cur = con.cursor()
-    cur.execute("""
-    SELECT user_id FROM users WHERE username=? AND password=?
-    """, (username, password))
-    data = cur.fetchone()
-    con.close()
-    return data[0] if data else None
 
 def get_user(uid):
-    con = connect()
-    cur = con.cursor()
-    cur.execute("SELECT * FROM users WHERE user_id=?", (uid,))
-    row = cur.fetchone()
-    con.close()
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT user_id,name,username,password,language,theme,created_at FROM users WHERE user_id=?", (uid,))
+    row = cur.fetchone(); c.close()
     if not row:
         return None
+    return {"user_id": row[0], "name": row[1], "username": row[2], "password": row[3],
+            "language": row[4], "theme": row[5], "created_at": row[6]}
 
-    return {
-        "user_id": row[0],
-        "name": row[1],
-        "username": row[2],
-        "password": row[3],
-        "language": row[4],
-    }
+def login(username, password):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT user_id FROM users WHERE username=? AND password=?", (username, password))
+    r = cur.fetchone(); c.close()
+    return r[0] if r else None
 
 def set_language(uid, lang):
-    con = connect()
-    cur = con.cursor()
-    cur.execute("UPDATE users SET language=? WHERE user_id=?", (lang, uid))
-    con.commit()
-    con.close()
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE users SET language=? WHERE user_id=?", (lang, uid)); c.commit(); c.close()
+
+def set_theme(uid, theme):
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE users SET theme=? WHERE user_id=?", (theme, uid)); c.commit(); c.close()
+
+# download logging
+def add_download(user_id, url, platform, file_name, status="pending"):
+    c = conn(); cur = c.cursor()
+    cur.execute("INSERT INTO downloads(user_id,url,platform,file_name,status,created_at) VALUES (?,?,?,?,?,?)",
+                (user_id, url, platform, file_name, status, datetime.utcnow().isoformat()))
+    c.commit(); id = cur.lastrowid; c.close(); return id
+
+def set_download_status(dl_id, status):
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE downloads SET status=? WHERE id=?", (status, dl_id)); c.commit(); c.close()
