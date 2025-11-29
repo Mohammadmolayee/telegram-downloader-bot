@@ -1,81 +1,196 @@
-import logging
+import os
+import asyncio
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
 
-from database import init_db, user_exists, create_user, login, get_user, set_language
-from keyboards import guest_keyboard, member_keyboard, language_inline
-from messages import t
+# فایل‌های پروژه
+from database import (
+    init_db, user_exists, create_user, login,
+    get_user, set_language
+)
+
+from keyboards import (
+    start_keyboard, panel_keyboard,
+    language_inline
+)
+
 from downloader import download_media
+from messages import t
 
-logging.basicConfig(level=logging.INFO)
+
+# وضعیت ساخت حساب و ورود
+user_state = {}
+pending_data = {}
 
 
+# -------------------------
+# /start
+# -------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    user = get_user(uid)
-    lang = user["language"] if user else "fa"
+    user_id = update.effective_user.id
 
-    if user:
-        await update.message.reply_text(t("start_member", lang),
-                                        reply_markup=member_keyboard(lang))
+    if user_exists(user_id):
+        user = get_user(user_id)
+        lang = user["language"]
+
+        await update.message.reply_text(
+            t(user, "start_member"),
+            reply_markup=panel_keyboard(lang)
+        )
     else:
-        await update.message.reply_text(t("start_guest", lang),
-                                        reply_markup=guest_keyboard(lang))
+        await update.message.reply_text(
+            t({"language": "fa"}, "start_guest"),
+            reply_markup=start_keyboard("fa")
+        )
 
 
-async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    uid = update.effective_user.id
-    user = get_user(uid)
+# -------------------------
+# هندل پیام‌ها
+# -------------------------
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message.text
+    user_id = update.effective_user.id
+
+    user = get_user(user_id)
     lang = user["language"] if user else "fa"
 
-    if text in ["🌐 زبان", "Language", "🌐 Language"]:
-        await update.message.reply_text(t("choose_lang", lang),
-                                        reply_markup=language_inline())
+    # -------------------------
+    # دکمه بازگشت
+    # -------------------------
+    if msg in ["🔙 بازگشت", "🔙 Back"]:
+        if user:
+            await update.message.reply_text(
+                t(user, "start_member"),
+                reply_markup=panel_keyboard(lang)
+            )
+        else:
+            await update.message.reply_text(
+                t({"language": "fa"}, "start_guest"),
+                reply_markup=start_keyboard("fa")
+            )
         return
 
-    if text in ["👤 ساخت حساب", "Create Account"]:
-        ok = create_user(uid, "User", f"user{uid}", "1234")
-        if ok:
-            await update.message.reply_text(t("account_created", lang),
-                                            reply_markup=member_keyboard(lang))
+    # -------------------------
+    # دکمه‌های پنل مهمان
+    # -------------------------
+    if msg in ["📖 راهنما", "📖 Help"]:
+        key = "help_guest" if not user else "help_member"
+        await update.message.reply_text(t({"language": lang}, key))
         return
 
-    if text.startswith("http"):
-        await download_media(text, update, lang)
+    if msg in ["📜 قوانین", "📜 Rules"]:
+        await update.message.reply_text(t({"language": lang}, "rules"))
         return
 
-    await update.message.reply_text("...")
+    if msg in ["ℹ درباره ما", "ℹ About"]:
+        await update.message.reply_text(t({"language": lang}, "about"))
+        return
+
+    if msg in ["🌐 زبان", "🌐 Language"]:
+        await update.message.reply_text(
+            t({"language": lang}, "choose_language"),
+            reply_markup=language_inline()
+        )
+        return
+
+    # -------------------------
+    # ساخت حساب
+    # -------------------------
+    if msg in ["👤 ساخت حساب", "👤 Create Account"]:
+        user_state[user_id] = "reg_name"
+        await update.message.reply_text(t({"language": lang}, "reg_name"))
+        return
+
+    if user_state.get(user_id) == "reg_name":
+        pending_data[user_id] = {"name": msg}
+        user_state[user_id] = "reg_username"
+        await update.message.reply_text(t({"language": lang}, "reg_username"))
+        return
+
+    if user_state.get(user_id) == "reg_username":
+        pending_data[user_id]["username"] = msg
+        user_state[user_id] = "reg_password"
+        await update.message.reply_text(t({"language": lang}, "reg_password"))
+        return
+
+    if user_state.get(user_id) == "reg_password":
+        info = pending_data[user_id]
+
+        done = create_user(user_id, info["name"], info["username"], msg)
+        user_state.pop(user_id, None)
+        pending_data.pop(user_id, None)
+
+        if done:
+            await update.message.reply_text(
+                t({"language": lang}, "reg_done"),
+                reply_markup=panel_keyboard(lang)
+            )
+        else:
+            await update.message.reply_text(
+                t({"language": lang}, "reg_fail")
+            )
+        return
+
+    # -------------------------
+    # دانلود
+    # -------------------------
+    if msg.startswith("http"):
+        await update.message.reply_text("⏳ فایل درحال پردازش است...")
+        await download_media(update, context, msg, lang)
+        return
+
+    # اگر دستور ناشناخته بود
+    await update.message.reply_text(
+        t({"language": lang}, "unknown")
+    )
 
 
-async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    data = update.callback_query.data
-    uid = update.effective_user.id
+# -------------------------
+# کال‌بک برای انتخاب زبان
+# -------------------------
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    user_id = query.from_user.id
 
     if data.startswith("lang_"):
-        lang = data.split("_")[1]
-        set_language(uid, lang)
-        await update.callback_query.edit_message_text(t("lang_changed", lang))
-        return
+        new_lang = data.split("_")[1]
+        set_language(user_id, new_lang)
+
+        await query.answer("زبان تغییر کرد")
+        await query.edit_message_text(
+            text=t({"language": new_lang}, "lang_changed")
+        )
 
 
+# -------------------------
+# MAIN
+# -------------------------
 async def main():
+    # دیتابیس
     init_db()
 
-    app = Application.builder().token("TOKEN").build()
+    TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        raise Exception("❌ BOT_TOKEN در Railway تنظیم نشده!")
 
+    app = Application.builder().token(TOKEN).build()
+
+    # هندلرها
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT, handle_msg))
-    app.add_handler(CallbackQueryHandler(callback))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    print("Bot is running...")
+    # اجرای ربات بدون بسته شدن لوپ
+    await app.run_polling(close_loop=False)
 
 
 if __name__ == "__main__":
-    import asyncio
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
+    asyncio.run(main())
