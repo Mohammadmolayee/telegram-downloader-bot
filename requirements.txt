@@ -6,3 +6,5 @@ aiohttp
 pydub
 requests
 aiohttp
+googletrans==4.0.0rc1
+aiofiles==23.1.0
