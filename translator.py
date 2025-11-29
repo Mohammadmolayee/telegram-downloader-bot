@@ -1,11 +1,13 @@
-from googletrans import Translator
-_tr = Translator()
+from deep_translator import GoogleTranslator
+from functools import lru_cache
 
-def translate_if_needed(text, src, dest):
-    if src == dest:
-        return text
+@lru_cache(maxsize=512)
+def translate_text(text: str, target: str):
     try:
-        res = _tr.translate(text, src=src, dest=dest)
-        return res.text
+        if target == "fa":
+            return text
+        # source is fa by design
+        translated = GoogleTranslator(source='auto', target=target).translate(text)
+        return translated
     except Exception:
         return text  # fallback to fa
